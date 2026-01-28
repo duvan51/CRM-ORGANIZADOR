@@ -20,7 +20,7 @@ backend/data/*.json
 
 # AI Agent data
 .gemini/
-e792475d-15a6-4224-89fa-bac81e9c49fa/
+# e792475d-15a6-4224-89fa-bac81e9c49fa/  <-- Removed from ignore by user request
 afc62e05-74bc-4dc6-9840-adc7ff2fe885/
 task.md
 implementation_plan.md

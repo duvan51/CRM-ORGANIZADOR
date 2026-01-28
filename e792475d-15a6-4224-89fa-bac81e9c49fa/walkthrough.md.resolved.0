@@ -1,0 +1,30 @@
+# Mejoras en el Backend - CRM Organizador
+
+Se realizaron mejoras significativas en la robustez y calidad del procesamiento de datos.
+
+## Cambios Realizados
+
+### ETL Robusto
+- **Soporte de Formatos:** Ahora el sistema busca y procesa tanto archivos `.xlsx` como `.xls`.
+- **Limpieza de Datos:** Se implementó una lógica para evitar que celdas vacías se conviertan en el texto `"nan"`.
+- **Tolerancia a Fallos:** Si una hoja de Excel tiene errores o le faltan columnas, el sistema guarda la advertencia pero continúa procesando el resto de las hojas.
+- **Normalización Avanzada:** Se mejoró la limpieza de nombres de columnas para eliminar caracteres especiales.
+
+### API Mejorada
+- La respuesta del endpoint `/upload` ahora incluye una lista de `advertencias` si hubo problemas parciales, permitiendo al usuario saber exactamente qué falló sin detener todo el proceso.
+
+## Verificación
+1. **Servidor Iniciado:** El servidor FastAPI está corriendo en el puerto 8000 con `--reload`.
+2. **Estructura de Datos:** Se asegura la creación de `data/raw` y `data/output` si no existen.
+
+```python
+# Ejemplo de respuesta exitosa con advertencias
+{
+    "status": "partial_success",
+    "registros_finales": 150,
+    "archivo": "data\\output\\audiencia.csv",
+    "advertencias": [
+        "Archivo 'ejemplo.xlsx', hoja 'Hoja1': Faltan columnas..."
+    ]
+}
+```

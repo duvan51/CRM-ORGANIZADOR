@@ -1,0 +1,26 @@
+# Plan de Mejora del CRM-ORGANIZADOR (UI/UX)
+
+Este plan detalla los cambios para mejorar la experiencia del usuario y la visualización de datos.
+
+## Cambios Propuestos
+
+### [Backend - API]
+#### [MODIFY] [etl.py](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/backend/app/etl.py)
+- Modificar el retorno de [procesar_archivos](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/backend/app/etl.py#22-109) para incluir una muestra de los datos procesados (o todos, si no son demasiados) para que el frontend pueda mostrarlos.
+
+### [Frontend - UI/UX]
+#### [MODIFY] [App.jsx](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/frontend/src/App.jsx)
+- **Estado de Carga:** Añadir un spinner o mensaje de "Procesando..." mientras se espera la respuesta del servidor.
+- **Mensaje de Éxito:** Mostrar "¡Archivos procesados con éxito!" al finalizar.
+- **Visualización de Datos:** Implementar una tabla dinámica para mostrar los registros unificados obtenidos del backend.
+- **Diseño Premium:** Aplicar estilos modernos usando el [App.css](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/frontend/src/App.css) existente o inline styles mejorados (Glassmorphism, gradientes).
+
+#### [MODIFY] [App.css](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/frontend/src/App.css)
+- Añadir estilos para la tabla, el loading y el layout general.
+
+## Plan de Verificación
+
+### Pruebas Manuales
+1. **Carga:** Verificar que aparezca el loading al hacer click en "Procesar".
+2. **Resultados:** Confirmar que la tabla se llena con los datos del CSV procesado.
+3. **Diseño:** Evaluar la estética general de la interfaz.

@@ -1,0 +1,15 @@
+# Plan de Mejora: Adición de Columnas en Tiempo Real
+
+Este plan permite añadir nuevos campos de unificación incluso durante el proceso de mapeo (Paso 2).
+
+## Cambios Propuestos
+
+### [Frontend - UI/UX]
+#### [MODIFY] [App.jsx](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/frontend/src/App.jsx)
+- **Componente de Gestión de Campos**: Extraer la lógica de añadir/quitar campos a un componente o sección reutilizable.
+- **Integración en Paso 2**: Mostrar la barra de "Nuevo campo" también en la pantalla de mapeo.
+- **Efecto de Sincronización**: Al añadir un campo, se debe actualizar el estado `mapping` de todas las hojas (usando [autoSuggest](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/frontend/src/App.jsx#25-40)) para que los nuevos dropdowns aparezcan instantáneamente.
+
+## Plan de Verificación
+1. **Flujo Paso 2**: Estar en el mapeo de hojas, añadir el campo "Email", y verificar que aparezca un nuevo dropdown en todas las hojas.
+2. **Consistencia**: Unificar y verificar que el nuevo campo aparezca en la tabla de resultados.
