@@ -17,6 +17,7 @@ frontend/node_modules/
 backend/data/*.csv
 backend/data/*.json
 !backend/data/.gitkeep
+*.db
 
 # AI Agent data
 .gemini/
