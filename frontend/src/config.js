@@ -5,10 +5,11 @@ const isProduction = import.meta.env.PROD;
 
 // Si estamos en producción, usamos rutas relativas para que el proxy de Node.js las capture.
 // En desarrollo, seguimos usando localhost:8000.
+// En producción, usamos rutas vacías para que el navegador use el mismo host/puerto.
 export const API_URL = isProduction 
-    ? window.location.origin 
-    : "http://localhost:8000";
+    ? "" 
+    : "http://localhost:3005";
 
 export const WS_URL = isProduction
-    ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
-    : "ws://localhost:8000/ws";
+    ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+    : "ws://localhost:3005";

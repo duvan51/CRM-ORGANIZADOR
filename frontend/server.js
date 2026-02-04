@@ -7,7 +7,7 @@ import cors from 'cors';
 import multer from 'multer';
 import { Op } from 'sequelize';
 import sequelize from './api/database.js';
-import { User, Agenda, Cita, Bloqueo, Alerta, HorarioAtencion, GlobalService, AgendaService, HorarioServicio, AgendaUsers } from './api/models.js';
+import { User, Agenda, Cita, Bloqueo, Alerta, HorarioAtencion, GlobalService, AgendaService, HorarioServicio } from './api/models.js';
 import { authenticateToken, createToken, hashPassword, verifyPassword } from './api/auth.js';
 import { analizarArchivos, procesarCitas } from './api/etl.js';
 
@@ -30,11 +30,16 @@ app.use(express.urlencoded({ extended: true }));
 // Sincronizar Base de Datos e Iniciar Admin si no existe
 const initDb = async () => {
     try {
+        console.log('[SISTEMA]: Iniciando sincronización de Base de Datos...');
         await sequelize.authenticate();
-        console.log('Conexión a MySQL establecida.');
-        await sequelize.sync();
+        console.log('[SISTEMA]: Conexión a MySQL exitosa.');
+
+        await sequelize.sync({ alter: false }); 
+        console.log('[SISTEMA]: Tablas sincronizadas correctamente.');
+
         const admin = await User.findOne({ where: { username: 'admin' } });
         if (!admin) {
+            console.log("[SISTEMA]: No se encontró admin. Creando usuario inicial...");
             const hashed = await hashPassword('admin123');
             await User.create({
                 username: 'admin',
@@ -42,10 +47,14 @@ const initDb = async () => {
                 full_name: 'Super Administrador',
                 role: 'superuser'
             });
+            console.log("[SISTEMA]: Usuario 'admin' creado exitosamente con pass 'admin123'.");
+        } else {
+            console.log("[SISTEMA]: Usuario admin ya existe.");
         }
-    } catch (e) { console.error('Error al iniciar DB:', e); }
+    } catch (e) { 
+        console.error('[CRÍTICO]: Error fatal al iniciar la base de datos:', e);
+    }
 };
-initDb();
 
 // --- AUTH ---
 app.post('/token', async (req, res) => {
@@ -253,8 +262,12 @@ app.get('/stats/agent-sales', authenticateToken, async (req, res) => {
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
 
-httpServer.listen(PORT, () => {
-    console.log(`=========================================`);
-    console.log(`CRM MONOLÍTICO (NODE.JS) EN PUERTO ${PORT}`);
-    console.log(`=========================================`);
+// Iniciar servidor después de intentar conectar a la DB
+initDb().then(() => {
+    httpServer.listen(PORT, () => {
+        console.log(`=========================================`);
+        console.log(`CRM MONOLÍTICO (NODE.JS) EN PUERTO ${PORT}`);
+        console.log(`URL: http://localhost:${PORT}`);
+        console.log(`=========================================`);
+    });
 });
