@@ -10,7 +10,6 @@ import AdminPanel from "./components/AdminPanel.jsx";
 import ConfirmationPanel from "./components/ConfirmationPanel.jsx";
 import SalesCounter from "./components/SalesCounter.jsx";
 import useWebSocket from "./hooks/useWebSocket.js";
-import { API_URL } from "./config.js";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div style={{ marginBottom: "30px", padding: "20px", background: "var(--input-bg)", borderRadius: "16px", border: "1px solid var(--glass-border)" }}>
     <h4 style={{ marginBottom: "15px" }}>Columnas a unificar:</h4>
