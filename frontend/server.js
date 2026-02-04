@@ -11,7 +11,16 @@ import { User, Agenda, Cita, Bloqueo, Alerta, HorarioAtencion, GlobalService, Ag
 import { authenticateToken, createToken, hashPassword, verifyPassword } from './api/auth.js';
 import { analizarArchivos, procesarCitas } from './api/etl.js';
 
+import fs from 'fs';
+
 console.log('>>> [INFO]: INICIANDO SERVER.JS CON WS NATIVO <<<');
+
+// Escribir en archivo de estado para saber SI O SI si Node arrancó
+try {
+    fs.writeFileSync('server_status.txt', `Iniciado en: ${new Date().toISOString()}\n`);
+} catch (e) {
+    console.error("No se pudo escribir status log");
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
