@@ -1,0 +1,28 @@
+# Plan de Carga Incremental y Unificación Opcional
+
+Este plan permite añadir archivos progresivamente y controlar si se desea eliminar duplicados o no.
+
+## Cambios Propuestos
+
+### [Backend - API]
+#### [MODIFY] [main.py](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/backend/app/main.py)
+- **`/upload`**: Añadir parámetro `append: bool`. Si es `False` (por defecto), limpia la carpeta. Si es `True`, solo añade los nuevos archivos.
+- **`/clear` (NUEVO)**: Endpoint para borrar todos los archivos en `data/raw`.
+
+### [Backend - ETL]
+#### [MODIFY] [etl.py](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/backend/app/etl.py)
+- **[procesar_archivos](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/backend/app/etl.py#71-174)**: Añadir parámetro `unificar: bool`. Si es `True`, ejecuta `drop_duplicates`. Si es `False`, mantiene todos los registros incluso si son idénticos.
+
+### [Frontend - UI/UX]
+#### [MODIFY] [App.jsx](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/frontend/src/App.jsx)
+- **Botón "Añadir más archivos"**: Nueva opción en el Paso 1 para subir documentos sin perder los anteriores.
+- **Botón "Limpiar todo"**: Para vaciar la lista de archivos cargados.
+- **Toggle "Unificar duplicados"**: Checkbox en el Paso 2 para decidir si se eliminan filas idénticas.
+- **Contador de Registros**: Mostrar "Total: X registros" sobre la tabla de resultados.
+
+## Plan de Verificación
+1. **Carga**: Subir un archivo, luego usar "Añadir más" con otro, y verificar que ambos aparezcan en el análisis.
+2. **Unificación**: Procesar dos hojas con datos idénticos.
+    - Con toggle ON: Debe mostrar 1 solo registro.
+    - Con toggle OFF: Deben aparecer ambos registros.
+3. **Contador**: Filtrar la tabla y ver que el contador se actualice.
