@@ -3,13 +3,13 @@ import { API_URL } from "./config";
 import "./index.css";
 import "./confirmation_pro.css";
 import "./sales.css";
-import CalendarView from "./components/CalendarView";
-import AgendaForm from "./components/AgendaForm";
-import Login from "./components/Login";
-import AdminPanel from "./components/AdminPanel";
-import ConfirmationPanel from "./components/ConfirmationPanel";
-import SalesCounter from "./components/SalesCounter";
-import useWebSocket from "./hooks/useWebSocket";
+import CalendarView from "./components/CalendarView.jsx";
+import AgendaForm from "./components/AgendaForm.jsx";
+import Login from "./components/Login.jsx";
+import AdminPanel from "./components/AdminPanel.jsx";
+import ConfirmationPanel from "./components/ConfirmationPanel.jsx";
+import SalesCounter from "./components/SalesCounter.jsx";
+import useWebSocket from "./hooks/useWebSocket.js";
 
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div style={{ marginBottom: "30px", padding: "20px", background: "var(--input-bg)", borderRadius: "16px", border: "1px solid var(--glass-border)" }}>
