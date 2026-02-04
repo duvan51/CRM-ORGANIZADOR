@@ -36,14 +36,18 @@ const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeF
 function App() {
   // VERIFICAR CONEXIÓN A BASE DE DATOS AL INICIAR
   useEffect(() => {
-    fetch(API_URL + '/health')
+    // Intentar primero endpoint directo
+    fetch('/health')
       .then(res => res.json())
       .then(data => {
-        if (data.status === "ok" && data.db_connected) {
-          alert("✅ CONEXIÓN EXITOSA: Base de Datos y Servidor funcionando correctamente.");
-        }
+        if (data.status === "ok") alert("✅ [VÍA /health] CONEXIÓN EXITOSA");
       })
-      .catch(err => console.error("Error verificando salud del sistema:", err));
+      .catch(() => {
+        // Si falla, intentar /api/health
+        fetch(API_URL + '/health').then(res => res.json()).then(d => {
+          if (d.status === "ok") alert("✅ [VÍA /api/health] CONEXIÓN EXITOSA");
+        });
+      });
   }, []);
 
   const [user, setUser] = useState(null);

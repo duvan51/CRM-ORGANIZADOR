@@ -19,6 +19,30 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const httpServer = createServer(app);
 
+// LOG DE REQUESTS DEBUG (LO MÁS ARRIBA POSIBLE)
+app.use((req, res, next) => {
+    console.log(`[INCOMING REQ]: ${req.method} ${req.url}`);
+    next();
+});
+
+// ENDPOINT HEALTH CHECK (DIRECTO EN APP, NO ROUTER)
+app.get('/health', async (req, res) => {
+    try {
+        await sequelize.authenticate();
+        res.json({ status: "ok", db: "connected", time: new Date() });
+    } catch (e) {
+        res.json({ status: "error", db: "failed", error: e.message });
+    }
+});
+app.get('/api/health', async (req, res) => { // Doble check
+    try {
+        await sequelize.authenticate();
+        res.json({ status: "ok", db: "connected", time: new Date() });
+    } catch (e) {
+        res.json({ status: "error", db: "failed", error: e.message });
+    }
+});
+
 // CONFIGURACIÓN WEBSOCKETS (REEMPLAZA A SOCKET.IO)
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' }); // Escuchar en /ws
 
