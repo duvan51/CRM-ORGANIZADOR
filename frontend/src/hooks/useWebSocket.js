@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { WS_URL } from '../config'; // Importar configuración central
 
 const useWebSocket = (onMessage) => {
     const ws = useRef(null);
@@ -13,8 +14,8 @@ const useWebSocket = (onMessage) => {
         const connect = () => {
             if (isUnmounting.current) return;
 
-            const host = window.location.hostname;
-            const socket = new WebSocket(`ws://${host}:8000/ws`);
+            console.log('Connecting to WebSocket:', WS_URL);
+            const socket = new WebSocket(WS_URL);
 
             socket.onopen = () => {
                 if (!isUnmounting.current) {
