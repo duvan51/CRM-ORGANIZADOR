@@ -73,12 +73,10 @@ const initDb = async () => {
         console.error('!!! [ERROR CRÍTICO EN DB] !!!');
         console.error('Mensaje:', e.message);
         console.error('Stack:', e.stack);
-        throw e; 
     }
 };
 
 // --- API ROUTES (con prefijo /api) ---
-const api = express.Router();
 
 // ENDPOINT DE SALUD Y VERIFICACIÓN DE DB
 api.get('/health', async (req, res) => {
@@ -290,8 +288,8 @@ app.use('/api', api);
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
 
-// Iniciar servidor después de intentar conectar a la DB
-initDb().then(() => {
+// Iniciar servidor SIEMPRE, falle o no la DB
+initDb().finally(() => {
     httpServer.listen(PORT, () => {
         console.log(`=========================================`);
         console.log(`CRM MONOLÍTICO (NODE.JS + WS) EN PUERTO ${PORT}`);
