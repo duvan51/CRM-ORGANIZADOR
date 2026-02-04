@@ -11,6 +11,8 @@ import { User, Agenda, Cita, Bloqueo, Alerta, HorarioAtencion, GlobalService, Ag
 import { authenticateToken, createToken, hashPassword, verifyPassword } from './api/auth.js';
 import { analizarArchivos, procesarCitas } from './api/etl.js';
 
+console.log('>>> [INFO]: INICIANDO SERVER.JS VERSIÓN DEBUG <<<');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -36,22 +38,28 @@ app.use((req, res, next) => {
 // Sincronizar Base de Datos e Iniciar Admin si no existe
 const initDb = async () => {
     try {
-        console.log('[SISTEMA]: Conectando a MySQL en 127.0.0.1...');
+        console.log('>>> [1/5]: Verificando conexión física a MySQL (127.0.0.1)...');
         await sequelize.authenticate();
-        console.log('[SISTEMA]: Autenticación exitosa.');
+        console.log('>>> [2/5]: AUTENTICACIÓN EXITOSA. MySQL aceptó las llaves.');
         
-        await sequelize.sync({ alter: true }); // <--- FORZAR CREACIÓN/ACTUALIZACIÓN
-        console.log('[SISTEMA]: Tablas creadas/actualizadas correctamente.');
+        console.log('>>> [3/5]: Intentando crear/sincronizar tablas con sync({alter:true})...');
+        await sequelize.sync({ alter: true }); 
+        console.log('>>> [4/5]: TABLAS SINCRONIZADAS. Revisar phpMyAdmin ahora.');
 
         const admin = await User.findOne({ where: { username: 'admin' } });
         if (!admin) {
+            console.log('>>> [5/5]: No existe Admin. Creando usuario "admin" con pass "admin123"...');
             const hashed = await hashPassword('admin123');
             await User.create({ username: 'admin', hashed_password: hashed, full_name: 'Super Administrador', role: 'superuser' });
-            console.log('[SISTEMA]: Admin creado.');
+            console.log('>>> [EXITO]: Todo listo. Admin creado.');
+        } else {
+            console.log('>>> [5/5]: Admin ya existe. Saltando paso.');
         }
     } catch (e) { 
-        console.error('[CRÍTICO]: Error fatal al iniciar la base de datos:', e);
-        throw e; // <--- LANZAR EL ERROR PARA QUE SE VEA EN HOSTINGER
+        console.error('!!! [ERROR CRÍTICO EN DB] !!!');
+        console.error('Mensaje:', e.message);
+        console.error('Stack:', e.stack);
+        throw e; 
     }
 };
 
