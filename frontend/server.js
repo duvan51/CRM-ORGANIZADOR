@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
-import { Server } from 'socket.io';
+import { WebSocketServer } from 'ws'; // USAR WS NATIVO
 import cors from 'cors';
 import multer from 'multer';
 import { Op } from 'sequelize';
@@ -11,15 +11,29 @@ import { User, Agenda, Cita, Bloqueo, Alerta, HorarioAtencion, GlobalService, Ag
 import { authenticateToken, createToken, hashPassword, verifyPassword } from './api/auth.js';
 import { analizarArchivos, procesarCitas } from './api/etl.js';
 
-console.log('>>> [INFO]: INICIANDO SERVER.JS VERSIÓN DEBUG <<<');
+console.log('>>> [INFO]: INICIANDO SERVER.JS CON WS NATIVO <<<');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-    cors: { origin: "*" }
+
+// CONFIGURACIÓN WEBSOCKETS (REEMPLAZA A SOCKET.IO)
+const wss = new WebSocketServer({ server: httpServer, path: '/ws' }); // Escuchar en /ws
+
+// Función para enviar mensajes a todos los clientes (Broadcast)
+const broadcast = (data) => {
+    wss.clients.forEach(client => {
+        if (client.readyState === 1) { // 1 = OPEN
+            client.send(JSON.stringify(data));
+        }
+    });
+};
+
+wss.on('connection', (ws) => {
+    console.log('[WS]: Cliente conectado');
+    ws.on('error', console.error);
 });
 
 const PORT = process.env.PORT || 3005;
@@ -66,7 +80,15 @@ const initDb = async () => {
 // --- API ROUTES (con prefijo /api) ---
 const api = express.Router();
 
-api.get('/health', (req, res) => res.json({ status: "ok", time: new Date() }));
+// ENDPOINT DE SALUD Y VERIFICACIÓN DE DB
+api.get('/health', async (req, res) => {
+    try {
+        await sequelize.authenticate();
+        res.json({ status: "ok", db_connected: true, time: new Date() });
+    } catch (error) {
+        res.status(500).json({ status: "error", db_connected: false, detail: error.message });
+    }
+});
 
 api.post('/token', async (req, res) => {
     const { username, password } = req.body;
@@ -181,21 +203,21 @@ api.get('/citas/:agendaId', authenticateToken, async (req, res) => {
 
 api.post('/citas', authenticateToken, async (req, res) => {
     const cita = await Cita.create({ ...req.body });
-    io.emit('REFRESH_CITAS', { agenda_id: cita.agenda_id });
+    broadcast({ type: 'REFRESH_CITAS', agenda_id: cita.agenda_id }); // USAR BROADCAST
     res.json(cita);
 });
 
 api.put('/citas/:id', authenticateToken, async (req, res) => {
     await Cita.update(req.body, { where: { id: req.params.id } });
     const cita = await Cita.findByPk(req.params.id);
-    io.emit('REFRESH_CITAS', { agenda_id: cita.agenda_id });
+    broadcast({ type: 'REFRESH_CITAS', agenda_id: cita.agenda_id }); // USAR BROADCAST
     res.json({ status: "ok" });
 });
 
 api.delete('/citas/:id', authenticateToken, async (req, res) => {
     const cita = await Cita.findByPk(req.params.id);
     await Cita.destroy({ where: { id: req.params.id } });
-    io.emit('REFRESH_CITAS', { agenda_id: cita.agenda_id });
+    broadcast({ type: 'REFRESH_CITAS', agenda_id: cita.agenda_id }); // USAR BROADCAST
     res.json({ status: "ok" });
 });
 
@@ -206,13 +228,13 @@ api.get('/citas/pending-confirmations/all', authenticateToken, async (req, res) 
 api.get('/agendas/:id/bloqueos', authenticateToken, async (req, res) => res.json(await Bloqueo.findAll({ where: { agenda_id: req.params.id } })));
 api.post('/bloqueos', authenticateToken, async (req, res) => {
     const b = await Bloqueo.create(req.body);
-    io.emit('REFRESH_BLOQUEOS', { agenda_id: b.agenda_id });
+    broadcast({ type: 'REFRESH_BLOQUEOS', agenda_id: b.agenda_id }); // USAR BROADCAST
     res.json(b);
 });
 api.delete('/bloqueos/:id', authenticateToken, async (req, res) => {
     const b = await Bloqueo.findByPk(req.params.id);
     await Bloqueo.destroy({ where: { id: req.params.id } });
-    io.emit('REFRESH_BLOQUEOS', { agenda_id: b.agenda_id });
+    broadcast({ type: 'REFRESH_BLOQUEOS', agenda_id: b.agenda_id }); // USAR BROADCAST
     res.json({ status: "ok" });
 });
 
@@ -250,7 +272,7 @@ api.post('/procesar-excel', authenticateToken, upload.single('file'), async (req
     const agendaId = req.body.agenda_id;
     const citas = procesarCitas(req.file.buffer, mapping, agendaId);
     await Cita.bulkCreate(citas);
-    io.emit('REFRESH_CITAS', { agenda_id: agendaId });
+    broadcast({ type: 'REFRESH_CITAS', agenda_id: agendaId }); // USAR BROADCAST
     res.json({ status: "success", count: citas.length });
 });
 
@@ -272,7 +294,7 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html
 initDb().then(() => {
     httpServer.listen(PORT, () => {
         console.log(`=========================================`);
-        console.log(`CRM MONOLÍTICO (NODE.JS) EN PUERTO ${PORT}`);
+        console.log(`CRM MONOLÍTICO (NODE.JS + WS) EN PUERTO ${PORT}`);
         console.log(`URL: https://lightpink-cormorant-608039.hostingersite.com/`);
         console.log(`=========================================`);
     });

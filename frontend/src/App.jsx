@@ -10,7 +10,7 @@ import AdminPanel from "./components/AdminPanel.jsx";
 import ConfirmationPanel from "./components/ConfirmationPanel.jsx";
 import SalesCounter from "./components/SalesCounter.jsx";
 import useWebSocket from "./hooks/useWebSocket.js";
-
+import { API_URL } from "./config.js";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div style={{ marginBottom: "30px", padding: "20px", background: "var(--input-bg)", borderRadius: "16px", border: "1px solid var(--glass-border)" }}>
     <h4 style={{ marginBottom: "15px" }}>Columnas a unificar:</h4>
@@ -35,6 +35,18 @@ const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeF
 );
 
 function App() {
+  // VERIFICAR CONEXIÓN A BASE DE DATOS AL INICIAR
+  useEffect(() => {
+    fetch(API_URL + '/health')
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "ok" && data.db_connected) {
+          alert("✅ CONEXIÓN EXITOSA: Base de Datos y Servidor funcionando correctamente.");
+        }
+      })
+      .catch(err => console.error("Error verificando salud del sistema:", err));
+  }, []);
+
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState("crm");
   const [files, setFiles] = useState(null);
