@@ -36,17 +36,22 @@ app.use((req, res, next) => {
 // Sincronizar Base de Datos e Iniciar Admin si no existe
 const initDb = async () => {
     try {
-        console.log('[SISTEMA]: Conectando a MySQL...');
+        console.log('[SISTEMA]: Conectando a MySQL en 127.0.0.1...');
         await sequelize.authenticate();
-        await sequelize.sync({ alter: false }); 
+        console.log('[SISTEMA]: Autenticación exitosa.');
+        
+        await sequelize.sync({ alter: true }); // <--- FORZAR CREACIÓN/ACTUALIZACIÓN
+        console.log('[SISTEMA]: Tablas creadas/actualizadas correctamente.');
+
         const admin = await User.findOne({ where: { username: 'admin' } });
         if (!admin) {
             const hashed = await hashPassword('admin123');
             await User.create({ username: 'admin', hashed_password: hashed, full_name: 'Super Administrador', role: 'superuser' });
+            console.log('[SISTEMA]: Admin creado.');
         }
-        console.log('[SISTEMA]: Base de datos lista.');
     } catch (e) { 
-        console.error('[CRÍTICO]: Error en DB:', e);
+        console.error('[CRÍTICO]: Error fatal al iniciar la base de datos:', e);
+        throw e; // <--- LANZAR EL ERROR PARA QUE SE VEA EN HOSTINGER
     }
 };
 
