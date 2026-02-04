@@ -1,28 +1,33 @@
-# Dependencies
+# Node dependencies
 node_modules/
-venv/
-.env
-__pycache__/
-*.pyc
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# IDEs and OS
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Build output
+dist/
+build/
+
+# IDE files
 .vscode/
 .idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
 .DS_Store
 Thumbs.db
 
-# Project specific
-backend/venv/
-frontend/node_modules/
-backend/data/**/*
-!backend/data/.gitkeep
+# Ancient backend leftovers (just in case)
 *.db
 *.sqlite3
-
-# AI Agent data
-.gemini/
-# e792475d-15a6-4224-89fa-bac81e9c49fa/  <-- Removed from ignore by user request
-afc62e05-74bc-4dc6-9840-adc7ff2fe885/
-task.md
-implementation_plan.md
-walkthrough.md
+__pycache__/
+venv/
