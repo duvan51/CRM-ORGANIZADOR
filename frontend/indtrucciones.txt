@@ -1,6 +1,0 @@
-backend ----
-
---- levantar servicio 
-venv\Scripts\activate
--- levantar servidor
-uvicorn app.main:app --reload

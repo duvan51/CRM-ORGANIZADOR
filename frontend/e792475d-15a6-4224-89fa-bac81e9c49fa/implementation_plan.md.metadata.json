@@ -1,6 +1,0 @@
-{
-  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
-  "summary": "Plan for incremental uploads, optional deduplication, and result counting improvements.",
-  "updatedAt": "2026-01-28T17:33:48.149019500Z",
-  "version": "6"
-}
