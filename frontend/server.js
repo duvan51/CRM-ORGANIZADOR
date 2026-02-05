@@ -35,6 +35,8 @@ app.use((req, res, next) => {
 });
 
 // ENDPOINT HEALTH CHECK (DIRECTO EN APP, NO ROUTER)
+app.get('/test-node', (req, res) => res.send('<h1>NODE JS IS WORKING</h1>')); // PRUEBA SIMPLE
+
 app.get('/health', async (req, res) => {
     try {
         await sequelize.authenticate();
@@ -334,10 +336,18 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html
 
 // Iniciar servidor SIEMPRE, falle o no la DB
 initDb().finally(() => {
-    httpServer.listen(PORT, () => {
+    // IMPORTANTE: En Hostinger, dejar el host vacío o usar '0.0.0.0'
+    const server = httpServer.listen(PORT, '0.0.0.0', () => {
+        const address = server.address();
         console.log(`=========================================`);
-        console.log(`CRM MONOLÍTICO (NODE.JS + WS) EN PUERTO ${PORT}`);
+        console.log(`CRM MONOLÍTICO (NODE.JS + WS)`);
+        console.log(`PUERTO: ${address.port} (Solicitado: ${PORT})`);
         console.log(`URL: https://lightpink-cormorant-608039.hostingersite.com/`);
         console.log(`=========================================`);
+        
+        // Escribir confirmación de arranque en archivo
+        try {
+            fs.appendFileSync('server_status.txt', `\n[${new Date().toISOString()}] LISTEN SUCCESS en puerto ${address.port}`);
+        } catch(e){}
     });
 });
