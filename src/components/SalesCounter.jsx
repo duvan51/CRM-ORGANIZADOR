@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import useWebSocket from "../hooks/useWebSocket";
-import { API_URL, WS_URL } from "../config";
+import { supabase } from "../supabase";
 
 const SalesCounter = ({ token }) => {
     const [sales, setSales] = useState({ total: 0, count: 0 });
@@ -8,13 +8,30 @@ const SalesCounter = ({ token }) => {
 
     const fetchSales = async () => {
         try {
-            const res = await fetch(`${API_URL}/stats/agent-sales`, {
-                headers: { "Authorization": `Bearer ${token}` }
+            const now = new Date();
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+
+            // Obtenemos citas confirmadas del mes
+            const { data, error } = await supabase
+                .from('citas')
+                .select('tipo_servicio')
+                .eq('confirmacion', 'Confirmada')
+                .gte('fecha', startOfMonth);
+
+            if (error) throw error;
+
+            // Cálculo simplificado: Si el servicio incluye "Sueroterapia", vale 550k.
+            // Para otros, asumimos un valor base o 0 si no se conoce.
+            let totalVentas = 0;
+            (data || []).forEach(c => {
+                if (c.tipo_servicio && c.tipo_servicio.toLowerCase().includes("sueroterapia")) {
+                    totalVentas += 550000;
+                } else {
+                    totalVentas += 150000; // Valor default para otros servicios por ahora
+                }
             });
-            if (res.ok) {
-                const data = await res.json();
-                setSales(data);
-            }
+
+            setSales({ total: totalVentas, count: (data || []).length });
         } catch (e) {
             console.error("Error fetching sales:", e);
         }

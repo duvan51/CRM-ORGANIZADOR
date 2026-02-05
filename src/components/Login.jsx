@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { API_URL } from "../config";
+import { supabase } from "../supabase";
 
 const Login = ({ onLoginSuccess }) => {
     const [username, setUsername] = useState("");
@@ -12,34 +12,45 @@ const Login = ({ onLoginSuccess }) => {
         setLoading(true);
         setError("");
 
-        const params = new URLSearchParams();
-        params.append("username", username);
-        params.append("password", password);
-
         try {
-            const response = await fetch(`${API_URL}/token`, {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: params,
+            // Limpiamos espacios accidentales
+            const cleanEmail = username.trim();
+            const cleanPassword = password.trim();
+
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: cleanEmail,
+                password: cleanPassword,
             });
 
+            if (error) throw error;
 
-            if (response.ok) {
-                const data = await response.json();
-                localStorage.setItem("token", data.access_token);
+            // Obtener perfil detallado (roles, agendas, etc.)
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select(`
+                    *,
+                    agendas:agenda_users(
+                        agendas(*)
+                    )
+                `)
+                .eq('id', data.user.id)
+                .single();
 
-                // Obtener datos del usuario
-                const userRes = await fetch(`${API_URL}/users/me`, {
-                    headers: { "Authorization": `Bearer ${data.access_token}` }
-                });
-                const userData = await userRes.json();
-
-                onLoginSuccess(userData);
+            if (profileError) {
+                // Si no hay perfil, creamos un objeto básico
+                onLoginSuccess({ username: data.user.email, role: 'agent', agendas: [] });
             } else {
-                setError("Usuario o contraseña incorrectos");
+                // Formatear agendas para el frontend
+                const formattedUser = {
+                    ...profile,
+                    agendas: profile.agendas.map(a => a.agendas)
+                };
+                onLoginSuccess(formattedUser);
             }
+
         } catch (err) {
-            setError("Error de conexión con el servidor");
+            console.error("Detalle del error:", err);
+            setError(err.message || "Credenciales incorrectas o correo no confirmado");
         } finally {
             setLoading(false);
         }
@@ -51,13 +62,13 @@ const Login = ({ onLoginSuccess }) => {
                 <h2 style={{ textAlign: "center", marginBottom: "24px" }}>Acceso Agentes</h2>
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
-                        <label>Usuario</label>
+                        <label>Correo Electrónico</label>
                         <input
-                            type="text"
+                            type="email"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                             required
-                            placeholder="Ej: admin"
+                            placeholder="tu@correo.com"
                         />
                     </div>
                     <div className="form-group" style={{ marginTop: "15px" }}>

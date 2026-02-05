@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { API_URL } from "./config";
+import { supabase } from "./supabase";
 import "./index.css";
 import "./confirmation_pro.css";
 import "./sales.css";
@@ -35,20 +35,7 @@ const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeF
 
 function App() {
   // VERIFICAR CONEXIÓN A BASE DE DATOS AL INICIAR
-  useEffect(() => {
-    // Intentar primero endpoint directo
-    fetch('/health')
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "ok") alert("✅ [VÍA /health] CONEXIÓN EXITOSA");
-      })
-      .catch(() => {
-        // Si falla, intentar /api/health
-        fetch(API_URL + '/health').then(res => res.json()).then(d => {
-          if (d.status === "ok") alert("✅ [VÍA /api/health] CONEXIÓN EXITOSA");
-        });
-      });
-  }, []);
+  // ELIMINADO EL HEALTH CHECK VIEJO DE EXPRESS
 
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState("crm");
@@ -71,6 +58,31 @@ function App() {
   const [activeAgenda, setActiveAgenda] = useState(null);
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
   const [pendingConfirmations, setPendingConfirmations] = useState(0); // For the bell
+
+  useEffect(() => {
+    const checkPending = async () => {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+        const { count, error } = await supabase
+          .from('citas')
+          .select('*', { count: 'exact', head: true })
+          .neq('confirmacion', 'Confirmada')
+          .neq('confirmacion', 'Cancelada')
+          .gte('fecha', today)
+          .lte('fecha', tomorrowStr);
+
+        if (!error) setPendingConfirmations(count || 0);
+      } catch (e) { console.error(e); }
+    };
+
+    checkPending();
+    const interval = setInterval(checkPending, 60000); // Cada minuto
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     document.body.setAttribute("data-theme", theme);
@@ -105,58 +117,61 @@ function App() {
   });
 
 
-  const fetchUserProfile = async (token) => {
+  const fetchUserProfile = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setUser(null);
+      return;
+    }
+
     try {
-      const res = await fetch(`${API_URL}/users/me`, {
-        headers: { "Authorization": `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUser(data);
-        // Autoseleccionar la primera agenda si no hay ninguna activa o la actual ya no está
-        if (data.agendas && data.agendas.length > 0) {
-          setActiveAgenda(prev => {
-            if (!prev || !data.agendas.some(a => a.id === prev.id)) {
-              return data.agendas[0];
-            }
-            return prev;
-          });
-        }
-      } else {
-        localStorage.removeItem("token");
-        setUser(null);
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select(`
+            *,
+            agendas:agenda_users(
+                agendas(*)
+            )
+        `)
+        .eq('id', session.user.id)
+        .single();
+
+      if (error) throw error;
+
+      const formattedUser = {
+        ...profile,
+        agendas: profile.agendas.map(a => a.agendas)
+      };
+
+      setUser(formattedUser);
+      if (formattedUser.agendas?.length > 0) {
+        setActiveAgenda(prev => prev || formattedUser.agendas[0]);
       }
     } catch (err) {
       console.error("Error al cargar perfil:", err);
-      localStorage.removeItem("token");
       setUser(null);
     }
   };
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (token) {
-      fetchUserProfile(token);
-      checkPendingConfirmations(token); // Initial check
-    }
+    fetchUserProfile();
+    checkPendingConfirmations();
   }, []);
 
-  const checkPendingConfirmations = async (token) => {
+  const checkPendingConfirmations = async () => {
     try {
-      const res = await fetch(`${API_URL}/citas/pending-confirmations/all`, {
-        headers: { "Authorization": `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        // Count ONLY urgent (days_until <= 1) and NOT confirmed
-        const urgent = data.filter(c => c.days_until <= 1 && c.confirmacion !== "Confirmada").length;
-        setPendingConfirmations(urgent);
-      }
+      const { data, error } = await supabase
+        .from('citas')
+        .select('*')
+        .eq('confirmacion', 'Pendiente'); // Ajusta según tu lógica
+
+      if (error) throw error;
+      setPendingConfirmations(data.length);
     } catch (e) { console.error(e); }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
   };
 
@@ -207,16 +222,34 @@ function App() {
     if (!files || files.length === 0) return;
     setLoading(true);
     setError(null);
-    const formData = new FormData();
-    for (let i = 0; i < files.length; i++) formData.append("files", files[i]);
+
     try {
-      const resp = await fetch(`${API_URL}/upload?append=${append}`, { method: "POST", body: formData });
-      const data = await resp.json();
-      if (data.status === "error") throw new Error(data.error);
-      setAnalysis(data);
+      const allData = [];
+      const fileAnalysis = [];
+      const { read, utils } = await import("xlsx");
+
+      for (const file of files) {
+        const data = await file.arrayBuffer();
+        const workbook = read(data);
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const json = utils.sheet_to_json(worksheet, { defval: "" });
+
+        if (json.length > 0) {
+          fileAnalysis.push({
+            filename: file.name,
+            columns: Object.keys(json[0])
+          });
+          allData.push(...json);
+        }
+      }
+
+      setAnalysis(fileAnalysis);
       setStep(2);
+      setResult({ data_preview: allData, columnas_reportadas: fileAnalysis[0]?.columns || [] });
     } catch (err) {
-      setError(err.message);
+      console.error(err);
+      setError("Error leyendo archivos: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -226,16 +259,34 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_URL}/process`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${localStorage.getItem("token")}` },
-        body: JSON.stringify({ selection: mapping, unificar, dedup_cols: dedupCols }),
+      // PROCESAMIENTO EN LADO DEL CLIENTE (FRONTEND)
+      const citasToInsert = result.data_preview.map(row => {
+        const mappedRow = {};
+        Object.keys(mapping).forEach(fileCol => {
+          const appField = mapping[fileCol];
+          if (appField) {
+            mappedRow[appField] = row[fileCol];
+          }
+        });
+        return {
+          ...mappedRow,
+          agenda_id: activeAgenda.id
+        };
       });
-      const data = await response.json();
-      setResult(data);
-      setStep(3);
+
+      const { data, error: sbError } = await supabase
+        .from('citas')
+        .insert(citasToInsert);
+
+      if (sbError) throw sbError;
+
+      alert(`✅ ${citasToInsert.length} citas cargadas exitosamente en la agenda ${activeAgenda.name}`);
+      setStep(1);
+      setResult(null);
+      setFiles(null);
     } catch (err) {
-      setError("Error procesando selección.");
+      console.error(err);
+      setError("Error subiendo datos a Supabase: " + err.message);
     } finally {
       setLoading(false);
     }

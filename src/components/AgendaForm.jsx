@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API_URL } from "../config";
+import { supabase } from "../supabase";
 
 const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, userRole, initialData = null, currentUserName = "" }) => {
 
@@ -35,22 +35,24 @@ const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, us
 
 
     useEffect(() => {
-        const fetchConfig = async () => {
-            try {
-                const [sRes, hRes, bRes, hsRes] = await Promise.all([
-                    fetch(`${API_URL}/agendas/${agendaId}/services`, { headers: { "Authorization": `Bearer ${token}` } }),
-                    fetch(`${API_URL}/agendas/${agendaId}/horarios`, { headers: { "Authorization": `Bearer ${token}` } }),
-                    fetch(`${API_URL}/agendas/${agendaId}/bloqueos`, { headers: { "Authorization": `Bearer ${token}` } }),
-                    fetch(`${API_URL}/agendas/${agendaId}/horarios-servicios`, { headers: { "Authorization": `Bearer ${token}` } })
-                ]);
-                const [sData, hData, bData, hsData] = await Promise.all([sRes.json(), hRes.json(), bRes.json(), hsRes.json()]);
-                setConfigServicios(Array.isArray(sData) ? sData : []);
-                setHorarios(Array.isArray(hData) ? hData : []);
-                setBloqueos(Array.isArray(bData) ? bData : []);
-                setHorariosServicios(Array.isArray(hsData) ? hsData : []);
-            } catch (e) { console.error(e); }
-        };
-        fetchConfig();
+        useEffect(() => {
+            const fetchConfig = async () => {
+                try {
+                    const [sRes, hRes, bRes, hsRes] = await Promise.all([
+                        supabase.from('agenda_services').select('*, service:global_services(*)').eq('agenda_id', agendaId),
+                        supabase.from('horarios_atencion').select('*').eq('agenda_id', agendaId),
+                        supabase.from('bloqueos').select('*').eq('agenda_id', agendaId),
+                        supabase.from('horarios_servicios').select('*').eq('agenda_id', agendaId)
+                    ]);
+
+                    setConfigServicios(sRes.data || []);
+                    setHorarios(hRes.data || []);
+                    setBloqueos(bRes.data || []);
+                    setHorariosServicios(hsRes.data || []);
+                } catch (e) { console.error(e); }
+            };
+            fetchConfig();
+        }, [agendaId]);
     }, [agendaId]);
 
     // Filtrar servicios disponibles según el día de la semana
@@ -137,7 +139,6 @@ const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, us
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        // Bloqueo de fechas pasadas para agentes
         if (userRole !== "superuser" && userRole !== "admin") {
             const now = new Date();
             const appointmentDate = new Date(`${formData.fecha}T${formData.hora}`);
@@ -149,33 +150,22 @@ const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, us
 
         setLoading(true);
         try {
-            const url = initialData
-                ? `${API_URL}/citas/${initialData.id}`
-                : `${API_URL}/citas`;
-            const method = initialData ? "PUT" : "POST";
-
-            const response = await fetch(url, {
-                method: method,
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
-                body: JSON.stringify(formData),
-            });
-
-            if (response.ok) {
-                onCitaCreated();
+            if (initialData) {
+                const { error } = await supabase
+                    .from('citas')
+                    .update(formData)
+                    .eq('id', initialData.id);
+                if (error) throw error;
             } else {
-                if (response.status === 401) {
-                    alert("Tu sesión ha expirado o no es válida. Por favor, cierra sesión e ingresa nuevamente.");
-                } else {
-                    const err = await response.json();
-                    alert(err.detail || "Error al procesar la cita");
-                }
+                const { error } = await supabase
+                    .from('citas')
+                    .insert(formData);
+                if (error) throw error;
             }
+            onCitaCreated();
         } catch (error) {
             console.error("Error:", error);
-            alert("Error de conexión");
+            alert("Error al procesar la cita: " + error.message);
         } finally {
             setLoading(false);
         }

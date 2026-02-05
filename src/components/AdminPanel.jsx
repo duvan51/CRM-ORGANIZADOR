@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API_URL } from "../config";
+import { supabase } from "../supabase";
 
 const AdminPanel = ({ token, onBack, userRole }) => {
     const [agendas, setAgendas] = useState([]);
@@ -38,48 +38,35 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const h = { "Authorization": `Bearer ${token}` };
-            const agRes = await fetch(`${API_URL}/agendas`, { headers: h });
-            const agData = await agRes.json();
-            const agendasList = Array.isArray(agData) ? agData : [];
+            // Cargar Agendas
+            const { data: agData, error: agError } = await supabase.from('agendas').select('*');
+            if (agError) throw agError;
+            const agendasList = agData || [];
             setAgendas(agendasList);
 
+            // Cargar Usuarios (Profiles) si es superuser
             if (userRole === "superuser") {
-                const usRes = await fetch(`${API_URL}/users`, { headers: h });
-                if (usRes.ok) setUsers(await usRes.json());
+                const { data: usData, error: usError } = await supabase.from('profiles').select('*');
+                if (usError) throw usError;
+                setUsers(usData || []);
             }
 
             // Catálogo Maestro
-            const sRes = await fetch(`${API_URL}/global-services`, { headers: h });
-            if (sRes.ok) setGlobalServices(await sRes.json());
+            const { data: sData, error: sError } = await supabase.from('global_services').select('*');
+            if (sError) throw sError;
+            setGlobalServices(sData || []);
 
-            // Combinar datos de todas las agendas accesibles
-            let allBlocks = [];
-            let allAlerts = [];
-            let allHorarios = [];
-            for (const ag of agendasList) {
-                const [bRes, aRes, hRes] = await Promise.all([
-                    fetch(`${API_URL}/agendas/${ag.id}/bloqueos`, { headers: h }),
-                    fetch(`${API_URL}/agendas/${ag.id}/alertas`, { headers: h }),
-                    fetch(`${API_URL}/agendas/${ag.id}/horarios`, { headers: h })
-                ]);
-                if (bRes.ok) allBlocks = [...allBlocks, ...await bRes.json()];
-                if (aRes.ok) allAlerts = [...allAlerts, ...await aRes.json()];
-                if (hRes.ok) allHorarios = [...allHorarios, ...await hRes.json()];
-            }
-            setBlocks(allBlocks);
-            setAlerts(allAlerts);
-            setHorarios(allHorarios);
+            // Cargar Bloqueos, Alertas y Horarios de todas las agendas
+            const [bRes, aRes, hRes] = await Promise.all([
+                supabase.from('bloqueos').select('*'),
+                supabase.from('alertas').select('*'),
+                supabase.from('horarios_atencion').select('*')
+            ]);
 
-            if (selectedAgendaForOffers) {
-                const offRes = await fetch(`${API_URL}/agendas/${selectedAgendaForOffers.id}/services`, { headers: h });
-                if (offRes.ok) setAgendaOffers(await offRes.json());
-            }
+            setBlocks(bRes.data || []);
+            setAlerts(aRes.data || []);
+            setHorarios(hRes.data || []);
 
-            if (selectedAgendaForHours) {
-                // Horarios ya están en allHorarios, pero forzamos un refetch global por simplicidad
-                // o podrías filtrar allHorarios aquí.
-            }
         } catch (error) { console.error("Error fetching data:", error); }
         setLoading(false);
     };
@@ -88,21 +75,21 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         if (!agendaId) return alert("Selecciona una agenda");
         if (!window.confirm("¿Estás seguro de que quieres cerrar todo el día? Se eliminarán todos los rangos horarios.")) return;
 
-        await fetch(`${API_URL}/agendas/${agendaId}/horarios/dia/${dayIndex}`, {
-            method: "DELETE",
-            headers: { "Authorization": `Bearer ${token}` }
-        });
+        await supabase.from('horarios_atencion')
+            .delete()
+            .eq('agenda_id', agendaId)
+            .eq('dia_semana', dayIndex);
+
         fetchData();
     };
 
     const handleUpdateService = async (e) => {
         e.preventDefault();
-        const res = await fetch(`${API_URL}/global-services/${showServiceModal.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify(editingService)
-        });
-        if (res.ok) {
+        const { error } = await supabase.from('global_services')
+            .update(editingService)
+            .eq('id', showServiceModal.id);
+
+        if (!error) {
             setShowServiceModal(null);
             fetchData();
         }
@@ -110,12 +97,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
     const handleCreateAgenda = async (e) => {
         e.preventDefault();
-        const res = await fetch(`${API_URL}/agendas`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify(newAgenda)
-        });
-        if (res.ok) {
+        const { error } = await supabase.from('agendas').insert(newAgenda);
+        if (!error) {
             setNewAgenda({ name: "", description: "", slots_per_hour: 1 });
             setShowEditAgenda(null);
             fetchData();
@@ -124,41 +107,35 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
     const handleDeleteAgenda = async (id) => {
         if (!confirm("¿Estás seguro de eliminar esta agenda y todas sus citas?")) return;
-        const res = await fetch(`${API_URL}/agendas/${id}`, {
-            method: "DELETE",
-            headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) fetchData();
+        const { error } = await supabase.from('agendas').delete().eq('id', id);
+        if (!error) fetchData();
     };
 
     const handleUpdateAgenda = async (e) => {
         e.preventDefault();
-        const res = await fetch(`${API_URL}/agendas/${showEditAgenda.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify(editingAgenda)
-        });
-        if (res.ok) { setShowEditAgenda(null); fetchData(); }
+        const { error } = await supabase.from('agendas')
+            .update(editingAgenda)
+            .eq('id', showEditAgenda.id);
+        if (!error) { setShowEditAgenda(null); fetchData(); }
     };
 
     const toggleAgentAssignment = async (userId, agendaId, isAssigned) => {
-        const method = isAssigned ? "DELETE" : "POST";
-        const url = isAssigned
-            ? `${API_URL}/agendas/${agendaId}/unassign/${userId}`
-            : `${API_URL}/agendas/${agendaId}/assign/${userId}`;
-
-        const res = await fetch(url, { method, headers: { "Authorization": `Bearer ${token}` } });
-        if (res.ok) fetchData();
+        if (isAssigned) {
+            await supabase.from('agenda_users')
+                .delete()
+                .eq('user_id', userId)
+                .eq('agenda_id', agendaId);
+        } else {
+            await supabase.from('agenda_users')
+                .insert({ user_id: userId, agenda_id: agendaId });
+        }
+        fetchData();
     };
 
     const handleDeleteUser = async (id) => {
-        if (!confirm("¿Eliminar este usuario?")) return;
-        const res = await fetch(`${API_URL}/users/${id}`, {
-            method: "DELETE",
-            headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) fetchData();
-        else alert("No se puede eliminar al admin principal");
+        if (!confirm("¿Eliminar este usuario? En Supabase esto desvinculará su perfil.")) return;
+        const { error } = await supabase.from('profiles').delete().eq('id', id);
+        if (!error) fetchData();
     };
 
     const handleCreateCreateBlock = async (e) => {
@@ -168,12 +145,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             service_id: newBlock.service_id === "" ? null : parseInt(newBlock.service_id),
             tipo: parseInt(newBlock.tipo)
         };
-        const res = await fetch(`${API_URL}/bloqueos`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify(payload)
-        });
-        if (res.ok) {
+        const { error } = await supabase.from('bloqueos').insert(payload);
+        if (!error) {
             setNewBlock({ agenda_id: "", fecha_inicio: "", fecha_fin: "", hora_inicio: "", hora_fin: "", es_todo_el_dia: 0, motivo: "", service_id: "", tipo: 1 });
             fetchData();
             alert("Operación completada con éxito");
@@ -182,56 +155,37 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
     const handleDeleteBlock = async (id) => {
         if (!confirm("¿Eliminar bloqueo?")) return;
-        const res = await fetch(`${API_URL}/bloqueos/${id}`, {
-            method: "DELETE",
-            headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) fetchData();
+        const { error } = await supabase.from('bloqueos').delete().eq('id', id);
+        if (!error) fetchData();
     };
 
     const handleCreateAlert = async (e) => {
         e.preventDefault();
-        const res = await fetch(`${API_URL}/alertas`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify(newAlert)
-        });
-        if (res.ok) {
+        const { error } = await supabase.from('alertas').insert(newAlert);
+        if (!error) {
             setNewAlert({ agenda_id: "", mensaje: "", tipo: "info" });
             fetchData();
         }
     };
 
     const handleDeleteAlert = async (id) => {
-        const res = await fetch(`${API_URL}/alertas/${id}`, {
-            method: "DELETE",
-            headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) fetchData();
+        const { error } = await supabase.from('alertas').delete().eq('id', id);
+        if (!error) fetchData();
     };
 
     const handleCreateUser = async (e) => {
         e.preventDefault();
-        const res = await fetch(`${API_URL}/users`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify(newUser)
-        });
-        if (res.ok) {
-            setNewUser({ username: "", password: "", full_name: "", role: "agent" });
-            setShowUserModal(false);
-            fetchData();
-        }
+        alert("Para crear un usuario en Supabase usa el panel de Authentication o la función de registro.");
+        // Nota: Crear usuarios con email/password requiere supabase.auth.signUp()
     };
 
     const handleFetchServiceHours = async (agendaId, serviceId) => {
-        const res = await fetch(`${API_URL}/agendas/${agendaId}/horarios-servicios`, {
-            headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) {
-            const all = await res.json();
-            setServiceHours(all.filter(h => h.service_id === serviceId));
-        }
+        const { data, error } = await supabase.from('horarios_servicios')
+            .select('*')
+            .eq('agenda_id', agendaId)
+            .eq('service_id', serviceId);
+
+        if (!error) setServiceHours(data || []);
     };
 
     const handleAddServiceHour = async (e) => {
@@ -244,12 +198,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             hora_inicio: fd.get("hora_inicio"),
             hora_fin: fd.get("hora_fin")
         };
-        const res = await fetch(`${API_URL}/horarios-servicios`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify(payload)
-        });
-        if (res.ok) handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
+        const { error } = await supabase.from('horarios_servicios').insert(payload);
+        if (!error) handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
     };
 
     // --- RENDER HELPERS ---
@@ -426,17 +376,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <form className="premium-form-v" onSubmit={async (e) => {
                             e.preventDefault();
                             const fd = new FormData(e.target);
-                            await fetch(`${API_URL}/horarios`, {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-                                body: JSON.stringify({
-                                    agenda_id: parseInt(fd.get("agenda_id")),
-                                    dia_semana: parseInt(fd.get("dia_semana")),
-                                    hora_inicio: fd.get("hora_inicio"),
-                                    hora_fin: fd.get("hora_fin")
-                                })
+                            const { error } = await supabase.from('horarios_atencion').insert({
+                                agenda_id: parseInt(fd.get("agenda_id")),
+                                dia_semana: parseInt(fd.get("dia_semana")),
+                                hora_inicio: fd.get("hora_inicio"),
+                                hora_fin: fd.get("hora_fin")
                             });
-                            fetchData();
+                            if (!error) fetchData();
                         }}>
                             <select name="agenda_id" required>
                                 <option value="">-- Agenda --</option>
@@ -485,10 +431,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                                 <span>{h.hora_inicio}-{h.hora_fin}</span>
                                                 <small>{agendas.find(a => a.id === h.agenda_id)?.name}</small>
                                                 <button className="btn-delete-tiny" onClick={async () => {
-                                                    await fetch(`${API_URL}/horarios/${h.id}`, {
-                                                        method: "DELETE",
-                                                        headers: { "Authorization": `Bearer ${token}` }
-                                                    });
+                                                    await supabase.from('horarios_atencion').delete().eq('id', h.id);
                                                     fetchData();
                                                 }}>×</button>
                                             </div>
@@ -517,13 +460,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         className="custom-file-input"
                         style={{ flex: 1, minWidth: '250px' }}
                         value={selectedAgendaForOffers?.id || ""}
-                        onChange={(e) => {
+                        onChange={async (e) => {
                             const ag = agendas.find(a => a.id === parseInt(e.target.value));
                             setSelectedAgendaForOffers(ag);
                             if (ag) {
-                                fetch(`${API_URL}/agendas/${ag.id}/services`, { headers: { "Authorization": `Bearer ${token}` } })
-                                    .then(res => res.json())
-                                    .then(data => setAgendaOffers(data));
+                                const { data } = await supabase.from('agenda_services').select('*, service:global_services(*)').eq('agenda_id', ag.id);
+                                setAgendaOffers(data || []);
                             } else {
                                 setAgendaOffers([]);
                             }
@@ -544,12 +486,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             <button className="btn-process" onClick={async () => {
                                 const sid = document.getElementById("offer-service-select").value;
                                 if (!sid) return;
-                                const res = await fetch(`${API_URL}/agenda-services`, {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-                                    body: JSON.stringify({ agenda_id: selectedAgendaForOffers.id, service_id: parseInt(sid) })
-                                });
-                                if (res.ok) fetchData();
+                                const { error } = await supabase.from('agenda_services').insert({ agenda_id: selectedAgendaForOffers.id, service_id: parseInt(sid) });
+                                if (!error) fetchData();
                             }}>+ Asignar</button>
                         </div>
                     )}
@@ -579,20 +517,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         onBlur={async (e) => {
                                             const val = parseFloat(e.target.value);
                                             if (val === off.precio_final) return;
-                                            await fetch(`${API_URL}/agenda-services/${off.id}`, {
-                                                method: "PUT",
-                                                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-                                                body: JSON.stringify({ precio_final: val })
-                                            });
+                                            await supabase.from('agenda_services').update({ precio_final: val }).eq('id', off.id);
                                             fetchData();
                                         }}
                                     />
                                     <button className="btn-delete-tiny" onClick={async () => {
                                         if (confirm("¿Desvincular este servicio de la agenda?")) {
-                                            await fetch(`${API_URL}/agenda-services/${off.id}`, {
-                                                method: "DELETE",
-                                                headers: { "Authorization": `Bearer ${token}` }
-                                            });
+                                            await supabase.from('agenda_services').delete().eq('id', off.id);
                                             fetchData();
                                         }
                                     }}>×</button>
@@ -641,11 +572,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         }}>✏️ Editar</button>
                                         <button className="btn-delete-v2" onClick={async () => {
                                             if (confirm("¿Eliminar este servicio del catálogo maestro? Esto lo quitará de todas las agendas.")) {
-                                                await fetch(`${API_URL}/global-services/${s.id}`, {
-                                                    method: "DELETE",
-                                                    headers: { "Authorization": `Bearer ${token}` }
-                                                });
-                                                fetchData();
+                                                const { error } = await supabase.from('global_services').delete().eq('id', s.id);
+                                                if (!error) fetchData();
                                             }
                                         }}>🗑️</button>
                                     </div>
@@ -714,11 +642,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <div key={h.id} className="mini-item-inline range-badge">
                                         <strong>{["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"][h.dia_semana]}</strong>: {h.hora_inicio} - {h.hora_fin}
                                         <button className="btn-delete-tiny" onClick={async () => {
-                                            await fetch(`${API_URL}/horarios-servicios/${h.id}`, {
-                                                method: "DELETE",
-                                                headers: { "Authorization": `Bearer ${token}` }
-                                            });
-                                            handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
+                                            const { error } = await supabase.from('horarios_servicios').delete().eq('id', h.id);
+                                            if (!error) handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
                                         }}>×</button>
                                     </div>
                                 ))}

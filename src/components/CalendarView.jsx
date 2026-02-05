@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API_URL } from "../config";
+import { supabase } from "../supabase";
 
 const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEditCita }) => {
 
@@ -37,15 +37,16 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
     const maxSlots = currentAgendaData?.slots_per_hour || 1;
 
     const fetchCitas = async () => {
-
         if (!agendaId) return;
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/citas/${agendaId}`, {
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setCitas(data);
+            const { data, error } = await supabase
+                .from('citas')
+                .select('*')
+                .eq('agenda_id', agendaId);
+
+            if (error) throw error;
+            setCitas(data || []);
         } catch (error) {
             console.error("Error fetching citas:", error);
         } finally {
@@ -55,25 +56,29 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
 
     const fetchBloqueos = async () => {
         try {
-            const res = await fetch(`${API_URL}/agendas/${agendaId}/bloqueos`, {
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            const data = await res.json();
-            setBloqueos(Array.isArray(data) ? data : []);
+            const { data, error } = await supabase
+                .from('bloqueos')
+                .select('*')
+                .eq('agenda_id', agendaId);
+
+            if (error) throw error;
+            setBloqueos(data || []);
         } catch (e) {
             console.error(e);
             setBloqueos([]);
         }
-
     };
 
     const fetchAlertas = async () => {
         try {
-            const res = await fetch(`${API_URL}/agendas/${agendaId}/alertas`, {
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            const data = await res.json();
-            setAlertas(Array.isArray(data) ? data : []);
+            const { data, error } = await supabase
+                .from('alertas')
+                .select('*')
+                .eq('agenda_id', agendaId)
+                .eq('activa', 1);
+
+            if (error) throw error;
+            setAlertas(data || []);
         } catch (e) {
             console.error(e);
             setAlertas([]);
@@ -82,31 +87,37 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
 
     const fetchHorarios = async () => {
         try {
-            const res = await fetch(`${API_URL}/agendas/${agendaId}/horarios`, {
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            const data = await res.json();
-            setHorarios(Array.isArray(data) ? data : []);
+            const { data, error } = await supabase
+                .from('horarios_atencion')
+                .select('*')
+                .eq('agenda_id', agendaId);
+
+            if (error) throw error;
+            setHorarios(data || []);
         } catch (e) { setHorarios([]); }
     };
 
     const fetchConfigServicios = async () => {
         try {
-            const res = await fetch(`${API_URL}/agendas/${agendaId}/services`, {
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            const data = await res.json();
-            setConfigServicios(Array.isArray(data) ? data : []);
+            const { data, error } = await supabase
+                .from('agenda_services')
+                .select('*, service:global_services(*)')
+                .eq('agenda_id', agendaId);
+
+            if (error) throw error;
+            setConfigServicios(data || []);
         } catch (e) { setConfigServicios([]); }
     };
 
     const fetchServiceSchedules = async () => {
         try {
-            const res = await fetch(`${API_URL}/agendas/${agendaId}/horarios-servicios`, {
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            const data = await res.json();
-            setHorariosServicios(Array.isArray(data) ? data : []);
+            const { data, error } = await supabase
+                .from('horarios_servicios')
+                .select('*, service:global_services(*)')
+                .eq('agenda_id', agendaId);
+
+            if (error) throw error;
+            setHorariosServicios(data || []);
         } catch (e) { setHorariosServicios([]); }
     };
 
@@ -138,39 +149,35 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
         if (motive === null) return;
 
         try {
-            const res = await fetch(`${API_URL}/bloqueos`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-                body: JSON.stringify({
+            const { error } = await supabase
+                .from('bloqueos')
+                .insert({
                     agenda_id: agendaId,
                     fecha_inicio: dateStr,
                     fecha_fin: dateStr,
                     es_todo_el_dia: 1,
                     motivo: motive
-                })
-            });
-            if (res.ok) {
-                alert("Horario bloqueado correctamente");
-                fetchBloqueos();
-            }
+                });
+
+            if (error) throw error;
+            alert("Horario bloqueado correctamente");
+            fetchBloqueos();
         } catch (e) { console.error(e); }
     };
 
     const handleDeleteCita = async (citaId) => {
         if (!confirm("¿Estás seguro de que deseas eliminar esta cita?")) return;
         try {
-            const res = await fetch(`${API_URL}/citas/${citaId}`, {
-                method: "DELETE",
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            if (res.ok) fetchCitas();
-            else {
-                const err = await res.json();
-                alert(err.detail || "Error al eliminar");
-            }
+            const { error } = await supabase
+                .from('citas')
+                .delete()
+                .eq('id', citaId);
+
+            if (error) throw error;
+            fetchCitas();
         } catch (e) {
             console.error(e);
-            alert("Error de conexión");
+            alert("Error al eliminar");
         }
     };
 

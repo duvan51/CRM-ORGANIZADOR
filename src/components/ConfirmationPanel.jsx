@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API_URL } from "../config";
+import { supabase } from "../supabase";
 
 const ConfirmationPanel = ({ token }) => {
     const [citas, setCitas] = useState([]);
@@ -9,16 +9,31 @@ const ConfirmationPanel = ({ token }) => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/citas/pending-confirmations/all`, {
-                headers: { "Authorization": `Bearer ${token}` }
+            const today = new Date().toISOString().split('T')[0];
+
+            const { data, error } = await supabase
+                .from('citas')
+                .select('*, agendas(name)')
+                .gte('fecha', today)
+                .neq('confirmacion', 'Cancelada')
+                .order('fecha', { ascending: true });
+
+            if (error) throw error;
+
+            // Enriquecer datos con days_until y agenda_nombre
+            const enrichedData = (data || []).map(c => {
+                const diff = new Date(c.fecha) - new Date(today);
+                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                return {
+                    ...c,
+                    days_until: days,
+                    agenda_nombre: c.agendas?.name || "Sin Agenda"
+                };
             });
-            if (res.ok) {
-                const data = await res.json();
-                setCitas(data);
-            } else {
-                setError("Error al cargar citas");
-            }
+
+            setCitas(enrichedData);
         } catch (e) {
+            console.error(e);
             setError("Error de conexión");
         } finally {
             setLoading(false);
@@ -35,17 +50,13 @@ const ConfirmationPanel = ({ token }) => {
     const handleConfirm = async (citaId) => {
         if (!window.confirm("¿Confirmar esta cita?")) return;
         try {
-            const res = await fetch(`${API_URL}/citas/${citaId}`, {
-                method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
-                body: JSON.stringify({ confirmacion: "Confirmada" })
-            });
-            if (res.ok) {
-                fetchData(); // Refresh list
-            }
+            const { error } = await supabase
+                .from('citas')
+                .update({ confirmacion: "Confirmada" })
+                .eq('id', citaId);
+
+            if (error) throw error;
+            fetchData();
         } catch (e) { alert("Error al confirmar"); }
     };
 
