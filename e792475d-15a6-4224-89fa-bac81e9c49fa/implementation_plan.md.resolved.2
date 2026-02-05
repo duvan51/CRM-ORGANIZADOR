@@ -1,0 +1,28 @@
+# Plan de Selección de Hojas y Agrupación por Archivo
+
+Este plan añade la capacidad de pre-analizar los archivos y permitir al usuario elegir qué hojas procesar.
+
+## Cambios Propuestos
+
+### [Backend - ETL]
+#### [MODIFY] [etl.py](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/backend/app/etl.py)
+- **Nueva Función `analizar_archivos`**: Devuelve un JSON con nombres de archivos y sus hojas.
+- **`procesar_archivos_seleccionados`**: Nueva versión de la función de procesado que acepta un diccionario de selección `{"archivo": ["hoja1", "hoja2"]}`.
+
+### [Backend - API]
+#### [MODIFY] [main.py](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/backend/app/main.py)
+- **Endpoint `/upload`**: Ahora solo guarda los archivos y devuelve el análisis (hojas disponibles).
+- **Nuevo Endpoint `/process`**: Recibe la selección del usuario y ejecuta el ETL.
+
+### [Frontend - UI/UX]
+#### [MODIFY] [App.jsx](file:///c:/Users/duvan/OneDrive/Escritorio/proyectos/CRM-ORGANIZADOR/frontend/src/App.jsx)
+- **Flujo en 3 Pasos**:
+    1. **Carga**: Seleccionar archivos locales.
+    2. **Selección**: Mostrar lista de archivos con sus hojas (checkboxes).
+    3. **Resultado**: Mostrar tabla unificada.
+- **Visualización Agrupada**: Los archivos se mostrarán como "tarjetas" o secciones, y dentro de cada uno sus hojas.
+
+## Plan de Verificación
+1. **Análisis**: Subir 2 archivos y ver que aparezcan sus nombres y hojas en pantalla.
+2. **Selección**: Desmarcar una hoja y verificar que no aparezca en el resultado final.
+3. **Persistencia**: Verificar que los archivos se borren o se sobrescriban correctamente entre cargas.
