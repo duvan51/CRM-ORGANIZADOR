@@ -15,6 +15,13 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
     const [serviceFilter, setServiceFilter] = useState(""); // ID of selected service to filter
     const [loading, setLoading] = useState(false);
 
+    const getLocalDateStr = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
 
     const [viewMode, setViewMode] = useState("month"); // "month", "week", "day"
 
@@ -23,7 +30,6 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
             fetchCitas();
             fetchBloqueos();
             fetchAlertas();
-            fetchHorarios();
             fetchHorarios();
             fetchConfigServicios(); // This fetches global config, but we need the specific endpoint for this agenda
             fetchServiceSchedules();
@@ -122,24 +128,100 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
     };
 
     // Helper to check if a specific time is allowed for the selected service filter
-    const isTimeAllowedForService = (date, hour) => {
-        if (!serviceFilter) return true; // No filter active
+    const isTimeAllowedForService = (date, hour, overrideFilter = undefined) => {
+        const dateStr = getLocalDateStr(date);
+        const sFilter = overrideFilter !== undefined ? overrideFilter : (serviceFilter ? parseInt(serviceFilter) : null);
+        const h5 = hour.substring(0, 5);
 
-        // Check if service has ANY rules
-        const hasRules = horariosServicios.some(hs => hs.service_id === parseInt(serviceFilter));
-        if (!hasRules) return true; // Service has no specific rules, so it follows general agenda
+        // 1. PRIORIDAD: Habilitaciones (Excepciones de apertura)
+        // Inclusivo: si sFilter es null, cualquier habilitación (de cualquier servicio o global) cuenta.
+        const hasEnablement = (bloqueos || []).some(b =>
+            b.tipo === 2 &&
+            b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
+            (b.service_id === null || (sFilter && b.service_id === sFilter) || (!sFilter && b.service_id !== null)) &&
+            (b.es_todo_el_dia || ((b.hora_inicio || "").substring(0, 5) <= h5 && (b.hora_fin || "").substring(0, 5) > h5))
+        );
+        if (hasEnablement) return true;
 
+        // 2. PRIORIDAD: Bloqueos (Excepciones de cierre)
+        const hasBlock = (bloqueos || []).some(b =>
+            b.tipo === 1 &&
+            b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
+            (b.service_id === null || (sFilter && b.service_id === sFilter)) &&
+            (b.es_todo_el_dia || ((b.hora_inicio || "").substring(0, 5) <= h5 && (b.hora_fin || "").substring(0, 5) > h5))
+        );
+        if (hasBlock) return false;
+
+        // 3. Fallback al horario recurrente
         const dayIndex = (date.getDay() + 6) % 7; // 0=Mon
-        const [h, m] = hour.split(":").map(Number);
 
-        // Find rules for this service on this day
-        const dayRules = horariosServicios.filter(hs => hs.service_id === parseInt(serviceFilter) && hs.dia_semana === dayIndex);
+        // Si no hay filtro, es inclusivo: permitido si la agenda general lo permite O algún servicio tiene regla
+        if (!sFilter) {
+            const inGeneral = (horarios || []).some(h =>
+                h.dia_semana === dayIndex &&
+                h.agenda_id === agendaId &&
+                (h.hora_inicio || "").substring(0, 5) <= h5 &&
+                (h.hora_fin || "").substring(0, 5) > h5
+            );
+            if (inGeneral) return true;
 
-        if (dayRules.length === 0) return false; // Has rules but none for today -> Blocked
+            const inAnyService = (horariosServicios || []).some(hs =>
+                hs.dia_semana === dayIndex &&
+                (hs.hora_inicio || "").substring(0, 5) <= h5 &&
+                (hs.hora_fin || "").substring(0, 5) > h5
+            );
+            return inAnyService;
+        }
 
-        return dayRules.some(rule => {
-            return hour >= rule.hora_inicio && hour < rule.hora_fin;
-        });
+        const hasRules = (horariosServicios || []).some(hs => hs.service_id === sFilter);
+        if (!hasRules) {
+            return (horarios || []).some(h =>
+                h.dia_semana === dayIndex &&
+                h.agenda_id === agendaId &&
+                (h.hora_inicio || "").substring(0, 5) <= h5 &&
+                (h.hora_fin || "").substring(0, 5) > h5
+            );
+        }
+
+        const dayRules = (horariosServicios || []).filter(hs => hs.service_id === sFilter && hs.dia_semana === dayIndex);
+        return dayRules.some(rule => h5 >= (rule.hora_inicio || "").substring(0, 5) && h5 < (rule.hora_fin || "").substring(0, 5));
+    };
+
+    const isAnyTimeAllowedOnDay = (date) => {
+        const dateStr = getLocalDateStr(date);
+        const sFilter = serviceFilter ? parseInt(serviceFilter) : null;
+
+        // 1. Alguna habilitación en el día? (Inclusivo para cualquier servicio si sFilter es null)
+        const hasEnablement = (bloqueos || []).some(b =>
+            b.tipo === 2 &&
+            b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
+            (b.service_id === null || (sFilter && b.service_id === sFilter) || (!sFilter && b.service_id !== null))
+        );
+        if (hasEnablement) return true;
+
+        // 2. Día totalmente bloqueado? (Bloqueo general o del servicio filtrado)
+        const isTotallyBlocked = (bloqueos || []).some(b =>
+            b.tipo === 1 &&
+            b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
+            b.es_todo_el_dia &&
+            (b.service_id === null || (sFilter && b.service_id === sFilter))
+        );
+        if (isTotallyBlocked) return false;
+
+        // 3. Horario recurrente
+        const dayOfWeek = (date.getDay() + 6) % 7;
+        if (!sFilter) {
+            const hasGeneral = (horarios || []).some(h => h.dia_semana === dayOfWeek && h.agenda_id === agendaId);
+            const hasAnyService = (horariosServicios || []).some(hs => hs.dia_semana === dayOfWeek);
+            return hasGeneral || hasAnyService;
+        }
+
+        const hSchedules = (horariosServicios || []).filter(hs => hs.service_id === sFilter);
+        if (hSchedules.length === 0) {
+            return (horarios || []).some(h => h.dia_semana === dayOfWeek && h.agenda_id === agendaId);
+        }
+
+        return hSchedules.some(hs => hs.dia_semana === dayOfWeek);
     };
 
 
@@ -211,21 +293,28 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
         const daysInMonth = getDaysInMonth(year, month);
 
         const days = [];
+        const weekDays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
         for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>);
         for (let d = 1; d <= daysInMonth; d++) {
-            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
             const dateObj = new Date(year, month, d);
+            const dateStr = getLocalDateStr(dateObj);
             const dayOfWeek = (dateObj.getDay() + 6) % 7;
 
             const dayCitas = citas.filter(c => c.fecha === dateStr);
             const isBlocked = (bloqueos || []).some(b => b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr && b.es_todo_el_dia && b.tipo === 1);
-            const hasEnablement = (bloqueos || []).some(b => b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr && b.tipo === 2);
-            const hasSchedule = horarios.some(h => h.dia_semana === dayOfWeek && h.agenda_id === agendaId);
 
-            const isClosed = !hasSchedule && !hasEnablement;
+            // La disponibilidad real del día la decide el helper unificado
+            const isAvailable = isAnyTimeAllowedOnDay(dateObj);
+
+            // Un día está "cerrado" si no hay ninguna regla que lo abra (general, servicio o excepción)
+            const isClosed = !isAvailable;
+
+            // Si hay un filtro, el color de 'no disponible' se aplica si ese servicio específico no puede operar
+            const isUnavailableByFilter = serviceFilter && !isAvailable;
 
             days.push(
-                <div key={d} className={`calendar-day ${isBlocked ? 'blocked-day' : ''} ${isClosed ? 'closed-day' : ''}`} onClick={() => handleDayClick(new Date(year, month, d))}>
+                <div key={d} className={`calendar-day ${isBlocked ? 'blocked-day' : ''} ${isClosed ? 'closed-day' : ''} ${isUnavailableByFilter ? 'unavailable-filter' : ''}`} onClick={() => handleDayClick(new Date(year, month, d))}>
                     <span className="day-number">{d}</span>
                     <div className="day-appointments">
                         {isBlocked ? <div className="blocked-label">No disponible</div> : (
@@ -243,7 +332,14 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
             );
         }
 
-        return <div className="calendar-grid">{days}</div>;
+        return (
+            <>
+                <div className="calendar-grid-header">
+                    {weekDays.map(wd => <div key={wd} className="calendar-day-header">{wd}</div>)}
+                </div>
+                <div className="calendar-grid">{days}</div>
+            </>
+        );
     };
 
     const renderWeekView = () => {
@@ -259,30 +355,40 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
         }
 
         // --- CALCULAR HORAS VISIBLES PARA LA SEMANA ---
-        // Buscamos el rango min/max de todas las reglas (horarios regulares + habilitaciones de esta semana)
         let minH = 24, maxH = 0;
+        const sFilter = serviceFilter ? parseInt(serviceFilter) : null;
+
         weekDays.forEach(date => {
-            const dateStr = date.toISOString().split('T')[0];
+            const dateStr = getLocalDateStr(date);
             const dayOfWeek = (date.getDay() + 6) % 7;
 
-            // Horarios regulares
-            const diaHorarios = horarios.filter(h => h.dia_semana === dayOfWeek && h.agenda_id === agendaId);
+            // 1. Horarios de la agenda
+            const diaHorarios = (horarios || []).filter(h => h.dia_semana === dayOfWeek && h.agenda_id === agendaId);
             diaHorarios.forEach(h => {
-                const start = parseInt(h.hora_inicio.split(":")[0]);
-                const end = parseInt(h.hora_fin.split(":")[0]) + (h.hora_fin.split(":")[1] !== "00" ? 1 : 0);
-                if (start < minH) minH = start;
-                if (end > maxH) maxH = end;
+                const s = parseInt(h.hora_inicio.split(":")[0]);
+                const e = parseInt(h.hora_fin.split(":")[0]) + (h.hora_fin.split(":")[1] !== "00" ? 1 : 0);
+                if (s < minH) minH = s;
+                if (e > maxH) maxH = e;
             });
 
-            // Habilitaciones
-            const weekHabilitaciones = bloqueos.filter(b => b.tipo === 2 && b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr);
-            weekHabilitaciones.forEach(b => {
+            // 2. Horarios de TODOS los servicios (inclusivo para calcular rango)
+            const sRules = (horariosServicios || []).filter(hs => hs.dia_semana === dayOfWeek);
+            sRules.forEach(r => {
+                const s = parseInt(r.hora_inicio.split(":")[0]);
+                const e = parseInt(r.hora_fin.split(":")[0]) + (r.hora_fin.split(":")[1] !== "00" ? 1 : 0);
+                if (s < minH) minH = s;
+                if (e > maxH) maxH = e;
+            });
+
+            // 3. Habilitaciones (inclusivo)
+            const hbs = (bloqueos || []).filter(b => b.tipo === 2 && b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr);
+            hbs.forEach(b => {
                 if (b.es_todo_el_dia) { minH = 0; maxH = 24; }
                 else if (b.hora_inicio && b.hora_fin) {
-                    const start = parseInt(b.hora_inicio.split(":")[0]);
-                    const end = parseInt(b.hora_fin.split(":")[0]) + (b.hora_fin.split(":")[1] !== "00" ? 1 : 0);
-                    if (start < minH) minH = start;
-                    if (end > maxH) maxH = end;
+                    const s = parseInt(b.hora_inicio.split(":")[0]);
+                    const e = parseInt(b.hora_fin.split(":")[0]) + (b.hora_fin.split(":")[1] !== "00" ? 1 : 0);
+                    if (s < minH) minH = s;
+                    if (e > maxH) maxH = e;
                 }
             });
         });
@@ -308,48 +414,42 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                 </div>
                 <div className="days-columns" style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", flex: 1 }}>
                     {weekDays.map((date, idx) => {
-                        const dateStr = date.toISOString().split('T')[0];
+                        const dateStr = getLocalDateStr(date);
                         const dayCitas = citas.filter(c => c.fecha === dateStr);
                         const isDayBlocked = (bloqueos || []).some(b => b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr && b.es_todo_el_dia && b.tipo === 1);
+                        const hasDayEnablement = (bloqueos || []).some(b => b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr && b.tipo === 2);
+
+                        // Visualmente bloqueado solo si no hay habilitaciones
+                        const isVisuallyBlocked = isDayBlocked && !hasDayEnablement;
 
                         return (
-                            <div key={idx} className={`day-column ${isDayBlocked ? 'blocked' : ''}`}>
+                            <div key={idx} className={`day-column ${isVisuallyBlocked ? 'blocked' : ''}`}>
                                 <div className="time-slot-header">
                                     {new Intl.DateTimeFormat('es-ES', { weekday: 'short', day: 'numeric' }).format(date)}
                                 </div>
                                 {visibleHours.map(h => {
                                     const slotCitas = dayCitas.filter(c => c.hora.startsWith(h.substring(0, 2)));
-                                    const isSlotBlocked = (bloqueos || []).some(b =>
-                                        b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
-                                        !b.es_todo_el_dia && b.hora_inicio <= h && b.hora_fin > h
-                                    );
 
-                                    // Verificar horario de atención para este día (0=Lunes, ..., 6=Domingo)
-                                    const dayOfWeek = (date.getDay() + 6) % 7; // Ajustar a 0=Lunes
-                                    const diaHorarios = horarios.filter(hor => hor.dia_semana === dayOfWeek && hor.agenda_id === agendaId);
+                                    // La disponibilidad real la decide el helper unificado
+                                    const isSlotAllowed = isTimeAllowedForService(date, h);
+                                    const isServiceBlocked = serviceFilter && !isSlotAllowed;
 
-                                    // Habilitaciones para este horario exacto
-                                    const hasSlotEnablement = (bloqueos || []).some(b =>
-                                        b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
-                                        b.tipo === 2 &&
-                                        (b.es_todo_el_dia || (b.hora_inicio <= h && b.hora_fin > h))
-                                    );
-
-                                    const isWorkHour = hasSlotEnablement || diaHorarios.some(hor => hor.hora_inicio <= h && hor.hora_fin > h);
+                                    // Para las rayas de "no laborativo" usamos la agenda general (filtro null)
+                                    const isBaseWorkHour = isTimeAllowedForService(date, h, null);
 
                                     const freeSlots = maxSlots - slotCitas.length;
-                                    const isServiceBlocked = serviceFilter && !isTimeAllowedForService(date, h);
 
                                     return (
                                         <div
                                             key={h}
-                                            className={`time-slot ${isSlotBlocked ? 'blocked-slot' : ''} ${!isWorkHour ? 'non-work-slot' : ''} ${slotCitas.length === 0 ? 'empty-slot' : ''} ${isServiceBlocked ? 'service-blocked' : ''}`}
+                                            className={`time-slot ${!isSlotAllowed && !isServiceBlocked ? 'blocked-slot' : ''} ${!isBaseWorkHour ? 'non-work-slot' : ''} ${slotCitas.length === 0 ? 'empty-slot' : ''} ${isServiceBlocked ? 'service-blocked' : ''}`}
                                             onClick={() => {
                                                 if (isServiceBlocked) {
                                                     alert("El servicio seleccionado no está disponible en este horario.");
                                                     return;
                                                 }
-                                                if (!isDayBlocked && !isSlotBlocked && isWorkHour) handleDayClick(new Date(date.setHours(parseInt(h), 0)));
+                                                // Si isSlotAllowed es true, permitimos interacción
+                                                if (isSlotAllowed) handleDayClick(new Date(date.setHours(parseInt(h), 0)));
                                             }}
                                             style={isServiceBlocked ? { opacity: 0.3, background: '#000' } : {}}
                                         >
@@ -364,17 +464,16 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                                                     )}
                                                 </div>
                                             ))}
-                                            {!isDayBlocked && !isSlotBlocked && isWorkHour && (
+                                            {isSlotAllowed && (
                                                 <div className="available-indicator">
                                                     {slotCitas.length === 0 ? "Libre" : `+${freeSlots}`}
                                                 </div>
                                             )}
-                                            {!isWorkHour && <div className="non-work-stripe"></div>}
-                                            {(isDayBlocked || isSlotBlocked) && <div className="blocked-stripe"></div>}
+                                            {!isSlotAllowed && !isBaseWorkHour && <div className="non-work-stripe"></div>}
+                                            {isVisuallyBlocked && !isSlotAllowed && <div className="blocked-stripe"></div>}
                                         </div>
                                     );
                                 })}
-
                             </div>
                         );
                     })}
@@ -385,22 +484,48 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
 
 
     const renderDayView = () => {
-        const dateStr = currentDate.toISOString().split('T')[0];
+        const dateStr = getLocalDateStr(currentDate);
         const dayCitas = citas.filter(c => c.fecha === dateStr);
         const isDayBlocked = (bloqueos || []).some(b => b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr && b.es_todo_el_dia && b.tipo === 1);
 
         const dayOfWeek = (currentDate.getDay() + 6) % 7;
-        const diaHorarios = horarios.filter(hor => hor.dia_semana === dayOfWeek && hor.agenda_id === agendaId);
+        const sFilter = serviceFilter ? parseInt(serviceFilter) : null;
 
-        // Habilitaciones para este día
-        const dayEnablements = (bloqueos || []).filter(b => b.tipo === 2 && b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr);
-
-        // Si no hay horarios ni habilitaciones, el día está totalmente cerrado.
-        // Si hay horarios, mostramos esos. Si hay habilitaciones además, las incluimos.
         const workHours = HOURS.filter(h => {
-            const inSchedule = diaHorarios.some(hor => hor.hora_inicio <= h && hor.hora_fin > h);
-            const inEnablement = dayEnablements.some(b => b.es_todo_el_dia || (b.hora_inicio <= h && b.hora_fin > h));
-            return inSchedule || inEnablement;
+            const h5 = h.substring(0, 5);
+            // 1. Horario general agenda
+            const inGeneral = (horarios || []).some(hor =>
+                hor.dia_semana === dayOfWeek &&
+                hor.agenda_id === agendaId &&
+                (hor.hora_inicio || "").substring(0, 5) <= h5 &&
+                (hor.hora_fin || "").substring(0, 5) > h5
+            );
+
+            // 2. Horario servicio filtrado
+            let inService = false;
+            if (sFilter) {
+                const hasRules = (horariosServicios || []).some(hs => hs.service_id === sFilter);
+                if (hasRules) {
+                    inService = (horariosServicios || []).some(hs =>
+                        hs.service_id === sFilter &&
+                        hs.dia_semana === dayOfWeek &&
+                        (hs.hora_inicio || "").substring(0, 5) <= h5 &&
+                        (hs.hora_fin || "").substring(0, 5) > h5
+                    );
+                } else {
+                    inService = inGeneral; // Hereda general si no tiene reglas
+                }
+            }
+
+            // 3. Habilitaciones
+            const inEnablement = (bloqueos || []).some(b =>
+                b.tipo === 2 &&
+                b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
+                (b.service_id === null || (sFilter && b.service_id === sFilter)) &&
+                (b.es_todo_el_dia || ((b.hora_inicio || "").substring(0, 5) <= h5 && (b.hora_fin || "").substring(0, 5) > h5))
+            );
+
+            return (sFilter ? (inService || inEnablement) : (inGeneral || inEnablement));
         });
 
         return (
@@ -419,25 +544,20 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                     <div className="day-column single">
                         {workHours.map(h => {
                             const slotCitas = dayCitas.filter(c => c.hora.startsWith(h.substring(0, 2)));
-                            const isSlotBlocked = (bloqueos || []).some(b =>
-                                b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
-                                !b.es_todo_el_dia && b.hora_inicio <= h && b.hora_fin > h
-                            );
-
+                            const isAllowed = isTimeAllowedForService(currentDate, h);
+                            const isServiceBlocked = serviceFilter && !isAllowed;
                             const freeSlots = maxSlots - slotCitas.length;
-
-                            const isServiceBlocked = serviceFilter && !isTimeAllowedForService(currentDate, h);
 
                             return (
                                 <div
                                     key={h}
-                                    className={`time-slot large ${isSlotBlocked ? 'blocked-slot' : ''} ${slotCitas.length === 0 ? 'empty-slot' : ''} ${isServiceBlocked ? 'service-blocked' : ''}`}
+                                    className={`time-slot large ${!isAllowed && !isServiceBlocked ? 'blocked-slot' : ''} ${slotCitas.length === 0 ? 'empty-slot' : ''} ${isServiceBlocked ? 'service-blocked' : ''}`}
                                     onClick={() => {
                                         if (isServiceBlocked) {
                                             alert("El servicio seleccionado no está disponible en este horario.");
                                             return;
                                         }
-                                        if (!isDayBlocked && !isSlotBlocked) handleDayClick(new Date(currentDate.setHours(parseInt(h), 0)));
+                                        if (isAllowed) handleDayClick(new Date(currentDate.setHours(parseInt(h), 0)));
                                     }}
                                     style={isServiceBlocked ? { opacity: 0.3, background: '#000' } : {}}
                                 >
@@ -469,12 +589,12 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                                             </div>
                                         </div>
                                     ))}
-                                    {!isDayBlocked && !isSlotBlocked && (
+                                    {isAllowed && (
                                         <div className="available-indicator large">
                                             {slotCitas.length === 0 ? "🟢 Horario Disponible - Haz clic para agendar" : `🔵 ${freeSlots} cupos disponibles`}
                                         </div>
                                     )}
-                                    {(isDayBlocked || isSlotBlocked) && <div className="blocked-stripe full"></div>}
+                                    {!isAllowed && <div className="blocked-stripe full"></div>}
                                 </div>
                             );
                         })}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../supabase";
 
-const ConfirmationPanel = ({ token }) => {
+const ConfirmationPanel = () => {
     const [citas, setCitas] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);

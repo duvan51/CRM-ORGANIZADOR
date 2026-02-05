@@ -4,7 +4,7 @@ import { supabase } from "../supabase";
 
 const SalesCounter = ({ token }) => {
     const [sales, setSales] = useState({ total: 0, count: 0 });
-    const { lastMessage } = useWebSocket(WS_URL);
+    const { lastMessage } = useWebSocket();
 
     const fetchSales = async () => {
         try {

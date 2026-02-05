@@ -134,13 +134,20 @@ function App() {
             )
         `)
         .eq('id', session.user.id)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
 
+      if (!profile) {
+        console.warn("⚠️ Perfil no encontrado para el usuario:", session.user.id);
+        // Podrías crear un perfil por defecto aquí o cerrar sesión
+        setUser({ id: session.user.id, username: session.user.email, full_name: "Usuario Nuevo", agendas: [] });
+        return;
+      }
+
       const formattedUser = {
         ...profile,
-        agendas: profile.agendas.map(a => a.agendas)
+        agendas: profile.agendas ? profile.agendas.map(a => a.agendas) : []
       };
 
       setUser(formattedUser);
@@ -206,13 +213,14 @@ function App() {
   const clearAllFiles = async () => {
     setLoading(true);
     try {
-      await fetch(`${API_URL}/clear`, { method: "POST" });
+      // Nota: La funcionalidad de 'clear' dependía del backend viejo. 
+      // Si necesitas limpiar datos en Supabase, deberías borrar las filas de las tablas.
       setAnalysis(null);
       setSelection({});
       setMapping({});
       setFiles(null);
     } catch (err) {
-      setError("Error al limpiar archivos.");
+      setError("Error al limpiar interfaz.");
     } finally {
       setLoading(false);
     }
@@ -406,8 +414,13 @@ function App() {
 
         {/* User Controls (Top Right) */}
         <div style={{ position: "absolute", top: 10, right: 20, display: "flex", alignItems: "center", gap: "10px" }}>
-          {activeTab === "agenda" && <SalesCounter token={localStorage.getItem("token")} />}
-          <button className="btn-logout" onClick={() => { localStorage.removeItem("token"); setUser(null); }}>
+          {activeTab === "agenda" && <SalesCounter />}
+          <button className="btn-logout" onClick={() => { handleLogout(); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
             Salir ({user.username})
           </button>
         </div>
@@ -459,8 +472,8 @@ function App() {
 
         {activeTab === "confirmaciones" && <ConfirmationPanel token={localStorage.getItem("token")} />}
 
-        {activeTab === "admin" && user.role === "superuser" && (
-          <AdminPanel token={localStorage.getItem("token")} onBack={() => setActiveTab("agenda")} userRole={user.role} />
+        {activeTab === "admin" && (user.role === "superuser" || user.role === "admin") && (
+          <AdminPanel onBack={() => setActiveTab("agenda")} userRole={user.role} />
         )}
 
         {activeTab === "agenda" && (
@@ -475,7 +488,7 @@ function App() {
                   }}
                   agendaId={activeAgenda.id}
                   agendas={user.agendas}
-                  token={localStorage.getItem("token")}
+                  token={null}
                   userRole={user.role}
                   onEditCita={(cita) => {
                     setEditingCita(cita);
@@ -490,7 +503,7 @@ function App() {
                     initialData={editingCita}
                     currentUserName={user.full_name || user.username}
                     agendaId={activeAgenda.id}
-                    token={localStorage.getItem("token")}
+                    token={null}
                     userRole={user.role}
                     onCitaCreated={() => {
                       setSelectedDate(null);

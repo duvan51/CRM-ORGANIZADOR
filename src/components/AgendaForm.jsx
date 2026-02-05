@@ -35,24 +35,22 @@ const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, us
 
 
     useEffect(() => {
-        useEffect(() => {
-            const fetchConfig = async () => {
-                try {
-                    const [sRes, hRes, bRes, hsRes] = await Promise.all([
-                        supabase.from('agenda_services').select('*, service:global_services(*)').eq('agenda_id', agendaId),
-                        supabase.from('horarios_atencion').select('*').eq('agenda_id', agendaId),
-                        supabase.from('bloqueos').select('*').eq('agenda_id', agendaId),
-                        supabase.from('horarios_servicios').select('*').eq('agenda_id', agendaId)
-                    ]);
+        const fetchConfig = async () => {
+            try {
+                const [sRes, hRes, bRes, hsRes] = await Promise.all([
+                    supabase.from('agenda_services').select('*, service:global_services(*)').eq('agenda_id', agendaId),
+                    supabase.from('horarios_atencion').select('*').eq('agenda_id', agendaId),
+                    supabase.from('bloqueos').select('*').eq('agenda_id', agendaId),
+                    supabase.from('horarios_servicios').select('*').eq('agenda_id', agendaId)
+                ]);
 
-                    setConfigServicios(sRes.data || []);
-                    setHorarios(hRes.data || []);
-                    setBloqueos(bRes.data || []);
-                    setHorariosServicios(hsRes.data || []);
-                } catch (e) { console.error(e); }
-            };
-            fetchConfig();
-        }, [agendaId]);
+                setConfigServicios(sRes.data || []);
+                setHorarios(hRes.data || []);
+                setBloqueos(bRes.data || []);
+                setHorariosServicios(hsRes.data || []);
+            } catch (e) { console.error(e); }
+        };
+        fetchConfig();
     }, [agendaId]);
 
     // Filtrar servicios disponibles según el día de la semana

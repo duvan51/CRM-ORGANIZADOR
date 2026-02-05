@@ -34,6 +34,12 @@
   --btn-secondary-text: #f1f5f9;
 }
 
+/* Fix for Select Options in Dark Mode */
+[data-theme='dark'] select option {
+  background-color: #1e293b;
+  color: #f1f5f9;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -129,6 +135,33 @@ body {
   transform: translateY(-2px) scale(1.02);
   box-shadow: 0 8px 25px rgba(99, 102, 241, 0.5);
   filter: brightness(1.1);
+}
+
+.btn-logout {
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  color: white;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+.btn-logout:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(239, 68, 68, 0.4);
+  filter: brightness(1.1);
+}
+
+.btn-logout svg {
+  width: 16px;
+  height: 16px;
 }
 
 .btn-delete {
@@ -266,8 +299,106 @@ tr:hover td {
   border: none;
   color: white;
   padding: 8px 15px;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calendar-day.unavailable-filter {
+  background: rgba(0, 0, 0, 0.4) !important;
+  opacity: 0.6;
+}
+
+.calendar-day.unavailable-filter .blocked-label {
+  color: #ff9999;
+  font-size: 0.6rem;
+  font-weight: bold;
+}
+
+/* Slots states */
+.time-slot.blocked-slot {
+  background: rgba(239, 68, 68, 0.1);
+  position: relative;
+}
+
+.time-slot.non-work-slot {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.time-slot.service-blocked {
+  background: #000 !important;
+  opacity: 0.4 !important;
+  cursor: not-allowed;
+}
+
+/* Stripes for visual clarity */
+.non-work-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(45deg,
+      transparent,
+      transparent 10px,
+      rgba(255, 255, 255, 0.03) 10px,
+      rgba(255, 255, 255, 0.03) 20px);
+  pointer-events: none;
+}
+
+.blocked-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(-45deg,
+      rgba(239, 68, 68, 0.1),
+      rgba(239, 68, 68, 0.1) 10px,
+      transparent 10px,
+      transparent 20px);
+  pointer-events: none;
+}
+
+.blocked-stripe.full {
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.available-indicator {
+  font-size: 0.65rem;
+  color: #4ade80;
+  margin-top: 5px;
+  font-weight: 600;
+  text-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+}
+
+.available-indicator.large {
+  font-size: 0.8rem;
+  color: #4ade80;
+}
+
+/* --- Calendar Grid --- */
+.calendar-grid-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.calendar-day-header {
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 5px 0;
 }
 
 .calendar-grid {
@@ -296,6 +427,17 @@ tr:hover td {
 .calendar-day:hover {
   background: rgba(255, 255, 255, 0.08);
   transform: translateY(-2px);
+}
+
+.closed-day {
+  background: rgba(255, 255, 255, 0.02);
+  opacity: 0.6;
+}
+
+.unavailable-filter {
+  opacity: 0.25;
+  filter: grayscale(0.8);
+  pointer-events: none;
 }
 
 .day-number {
@@ -899,9 +1041,15 @@ tr:hover td {
 
 /* --- Config Grid --- */
 .config-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 30px;
+}
+
+.config-grid .premium-card {
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
 }
 
 .mini-list {
@@ -1308,6 +1456,12 @@ tr:hover td {
   background: #6366f1;
   color: white;
   transform: translateY(-2px);
+}
+
+.mini-item-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .closed-day {

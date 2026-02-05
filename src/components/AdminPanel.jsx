@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 
 const AdminPanel = ({ token, onBack, userRole }) => {
+    console.log("AdminPanel Mount - Role:", userRole);
     const [agendas, setAgendas] = useState([]);
     const [users, setUsers] = useState([]);
     const [blocks, setBlocks] = useState([]);
@@ -9,10 +11,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [horarios, setHorarios] = useState([]);
     const [globalServices, setGlobalServices] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [activeView, setActiveView] = useState(userRole === "superuser" ? "agendas" : "bloqueos");
+    const [activeView, setActiveView] = useState((userRole === "superuser" || userRole === "admin") ? "agendas" : "bloqueos");
     const [selectedAgendaForOffers, setSelectedAgendaForOffers] = useState(null);
     const [agendaOffers, setAgendaOffers] = useState([]);
     const [selectedAgendaForHours, setSelectedAgendaForHours] = useState(null);
+    const [allAgendaServices, setAllAgendaServices] = useState([]);
 
     // States for Modals
     const [showAgentModal, setShowAgentModal] = useState(null); // stores agenda object
@@ -23,30 +26,62 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [editingService, setEditingService] = useState({ nombre: "", precio_base: 0, duracion_minutos: 30, concurrency: 1, color: "#3b82f6", image_url: "", descripcion: "" });
 
     const [newAgenda, setNewAgenda] = useState({ name: "", description: "", slots_per_hour: 1 });
-    const [newUser, setNewUser] = useState({ username: "", password: "", full_name: "", role: "agent" });
+    const [newUser, setNewUser] = useState({
+        full_name: "",
+        username: "",
+        email: "",
+        password: "",
+        role: "agent"
+    });
     const [newBlock, setNewBlock] = useState({ agenda_id: "", fecha_inicio: "", fecha_fin: "", hora_inicio: "", hora_fin: "", es_todo_el_dia: 0, motivo: "", service_id: "", tipo: 1 });
     const [newAlert, setNewAlert] = useState({ agenda_id: "", mensaje: "", tipo: "info" });
 
     // Service Hours State
     const [showServiceHoursModal, setShowServiceHoursModal] = useState(null);
     const [serviceHours, setServiceHours] = useState([]);
+    const [editingGeneralHour, setEditingGeneralHour] = useState(null);
+    const [editingServiceHour, setEditingServiceHour] = useState(null);
 
     useEffect(() => {
         fetchData();
     }, []);
 
+    const fetchAgendaOffers = async (agenda) => {
+        if (!agenda) return;
+        const { data } = await supabase.from('agenda_services').select('*, service:global_services(*)').eq('agenda_id', agenda.id);
+        setAgendaOffers(data || []);
+    };
+
     const fetchData = async () => {
         setLoading(true);
         try {
-            // Cargar Agendas
-            const { data: agData, error: agError } = await supabase.from('agendas').select('*');
+            // Cargar Agendas con sus usuarios vinculados para detectar asignaciones
+            const { data: agData, error: agError } = await supabase
+                .from('agendas')
+                .select('*, users:agenda_users(id:user_id)');
+
             if (agError) throw agError;
-            const agendasList = agData || [];
+            let agendasList = agData || [];
+
+            // Si es admin (pero no superuser), filtrar solo las agendas asignadas
+            if (userRole === "admin") {
+                const { data: { session } } = await supabase.auth.getSession();
+                agendasList = agendasList.filter(a => a.users && a.users.some(u => u.id === session?.user?.id));
+            }
+
             setAgendas(agendasList);
 
-            // Cargar Usuarios (Profiles) si es superuser
-            if (userRole === "superuser") {
-                const { data: usData, error: usError } = await supabase.from('profiles').select('*');
+            // Auto-seleccionar primera agenda si no hay ninguna para servicios
+            if (!selectedAgendaForOffers && agendasList.length > 0) {
+                setSelectedAgendaForOffers(agendasList[0]);
+                fetchAgendaOffers(agendasList[0]);
+            } else if (selectedAgendaForOffers) {
+                fetchAgendaOffers(selectedAgendaForOffers);
+            }
+
+            // Cargar Usuarios (Profiles) si es superuser o admin
+            if (userRole === "superuser" || userRole === "admin") {
+                const { data: usData, error: usError } = await supabase.from('profiles').select('*, agendas:agenda_users(agenda:agendas(id, name))');
                 if (usError) throw usError;
                 setUsers(usData || []);
             }
@@ -56,16 +91,18 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             if (sError) throw sError;
             setGlobalServices(sData || []);
 
-            // Cargar Bloqueos, Alertas y Horarios de todas las agendas
-            const [bRes, aRes, hRes] = await Promise.all([
+            // Cargar Bloqueos, Alertas, Horarios y Mapeo de Servicios-Agenda
+            const [bRes, aRes, hRes, asRes] = await Promise.all([
                 supabase.from('bloqueos').select('*'),
                 supabase.from('alertas').select('*'),
-                supabase.from('horarios_atencion').select('*')
+                supabase.from('horarios_atencion').select('*'),
+                supabase.from('agenda_services').select('agenda_id, service_id')
             ]);
 
             setBlocks(bRes.data || []);
             setAlerts(aRes.data || []);
             setHorarios(hRes.data || []);
+            setAllAgendaServices(asRes.data || []);
 
         } catch (error) { console.error("Error fetching data:", error); }
         setLoading(false);
@@ -175,8 +212,125 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
     const handleCreateUser = async (e) => {
         e.preventDefault();
-        alert("Para crear un usuario en Supabase usa el panel de Authentication o la función de registro.");
-        // Nota: Crear usuarios con email/password requiere supabase.auth.signUp()
+        setLoading(true);
+        try {
+            // 1. Crear un cliente temporal que NO guarde la sesión en el navegador
+            // Esto evita que el nuevo usuario "reemplace" al superadmin actual.
+            const tempClient = createClient(
+                import.meta.env.VITE_SUPABASE_URL,
+                import.meta.env.VITE_SUPABASE_ANON_KEY,
+                {
+                    auth: {
+                        persistSession: false,
+                        autoRefreshToken: false,
+                        detectSessionInUrl: false
+                    }
+                }
+            );
+
+            // 2. Crear usuario en Supabase Auth usando el cliente temporal
+            const { data: authData, error: authError } = await tempClient.auth.signUp({
+                email: newUser.email,
+                password: newUser.password,
+                options: {
+                    data: {
+                        full_name: newUser.full_name,
+                        username: newUser.username,
+                    }
+                }
+            });
+
+            if (authError) throw authError;
+
+            // 3. Crear perfil en la tabla 'profiles' usando el cliente principal (Superadmin)
+            const { error: profileError } = await supabase
+                .from('profiles')
+                .upsert({
+                    id: authData.user.id,
+                    username: newUser.username,
+                    full_name: newUser.full_name,
+                    role: newUser.role
+                });
+
+            if (profileError) {
+                console.error("Auth creado pero perfil falló:", profileError);
+            }
+
+            // 4. SI EL CREADOR ES ADMIN: Vincular automáticamente al nuevo agente a las agendas de este Admin
+            if (userRole === "admin" && agendas.length > 0) {
+                console.log("DEBUG: Vinculando nuevo agente a las agendas del admin creador...");
+                const assignments = agendas.map(ag => ({
+                    user_id: authData.user.id,
+                    agenda_id: ag.id
+                }));
+
+                const { error: linkError } = await supabase
+                    .from('agenda_users')
+                    .insert(assignments);
+
+                if (linkError) console.error("Error al auto-vincular agente:", linkError);
+                else console.log("✅ Agente vinculado a:", agendas.length, "agendas.");
+            }
+
+            alert(`Usuario creado correctamente${userRole === "admin" ? " y vinculado a tus agendas" : ""}. Se ha enviado un correo de confirmación.`);
+            setShowUserModal(false);
+            setNewUser({ full_name: "", username: "", email: "", password: "", role: "agent" });
+            fetchData();
+        } catch (error) {
+            console.error("Error al crear usuario:", error);
+            alert("Error: " + error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSaveService = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        try {
+            const isNew = showServiceModal.id === 'new';
+            const payload = {
+                nombre: editingService.nombre,
+                descripcion: editingService.descripcion,
+                precio_base: parseFloat(editingService.precio_base),
+                duracion_minutos: parseInt(editingService.duracion_minutos),
+                concurrency: parseInt(editingService.concurrency),
+                color: editingService.color,
+                image_url: editingService.image_url
+            };
+
+            let serviceId = showServiceModal.id;
+
+            if (isNew) {
+                const { data, error } = await supabase.from('global_services').insert(payload).select();
+                if (error) throw error;
+                serviceId = data[0].id;
+
+                // Asignar a agendas
+                const selectedAgendas = new FormData(e.target).getAll("assign_to");
+                if (selectedAgendas.length > 0) {
+                    let toAssign = [];
+                    if (selectedAgendas.includes("-1")) {
+                        toAssign = agendas.map(ag => ({ agenda_id: ag.id, service_id: serviceId }));
+                    } else {
+                        toAssign = selectedAgendas.map(id => ({ agenda_id: parseInt(id), service_id: serviceId }));
+                    }
+                    await supabase.from('agenda_services').insert(toAssign);
+                }
+            } else {
+                const { error } = await supabase.from('global_services').update(payload).eq('id', serviceId);
+                if (error) throw error;
+            }
+
+            alert(isNew ? "Servicio creado con éxito" : "Cambios guardados");
+            setShowServiceModal(null);
+            fetchData();
+        } catch (error) {
+            console.error("Error saving service:", error);
+            alert("Error: " + error.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleFetchServiceHours = async (agendaId, serviceId) => {
@@ -198,8 +352,23 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             hora_inicio: fd.get("hora_inicio"),
             hora_fin: fd.get("hora_fin")
         };
-        const { error } = await supabase.from('horarios_servicios').insert(payload);
-        if (!error) handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
+
+        let error;
+        if (editingServiceHour) {
+            const { error: err } = await supabase.from('horarios_servicios')
+                .update(payload)
+                .eq('id', editingServiceHour.id);
+            error = err;
+        } else {
+            const { error: err } = await supabase.from('horarios_servicios').insert(payload);
+            error = err;
+        }
+
+        if (!error) {
+            setEditingServiceHour(null);
+            e.target.reset();
+            handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
+        }
     };
 
     // --- RENDER HELPERS ---
@@ -234,40 +403,51 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         </div>
     );
 
-    const renderUsers = () => (
-        <div className="admin-section fade-in">
-            <div className="section-header">
-                <h3>Gestión de Personal</h3>
-                <button className="btn-process" onClick={() => setShowUserModal(true)}>+ Nuevo Usuario</button>
-            </div>
-            <div className="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Nombre</th>
-                            <th>Usuario</th>
-                            <th>Rol</th>
-                            <th>Agendas</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {users.map(u => (
-                            <tr key={u.id}>
-                                <td><strong>{u.full_name}</strong></td>
-                                <td>@{u.username}</td>
-                                <td><span className={`role-badge ${u.role}`}>{u.role}</span></td>
-                                <td>{u.agendas?.map(a => a.name).join(", ") || "Sin acceso"}</td>
-                                <td>
-                                    <button className="btn-delete" style={{ padding: '6px 12px' }} onClick={() => handleDeleteUser(u.id)}>🗑️</button>
-                                </td>
+    const renderUsers = () => {
+        // Filtrar usuarios para mostrar solo los que el Admin debe ver
+        const filteredUsers = users.filter(u => {
+            if (userRole === "superuser") return true;
+            // Si es admin, ver solo usuarios que compartan al menos una agenda con él
+            return u.agendas?.some(ua => agendas.some(ag => ag.id === ua.agenda.id));
+        });
+
+        return (
+            <div className="admin-section fade-in">
+                <div className="section-header">
+                    <h3>Gestión de Personal</h3>
+                    <button className="btn-process" onClick={() => setShowUserModal(true)}>+ Nuevo Usuario</button>
+                </div>
+                <div className="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Usuario</th>
+                                <th>Rol</th>
+                                <th>Agendas</th>
+                                {userRole === "superuser" && <th>Acciones</th>}
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {filteredUsers.map(u => (
+                                <tr key={u.id}>
+                                    <td><strong>{u.full_name}</strong></td>
+                                    <td>@{u.username}</td>
+                                    <td><span className={`role-badge ${u.role}`}>{u.role}</span></td>
+                                    <td>{u.agendas?.map(ua => ua.agenda.name).join(", ") || "Sin acceso"}</td>
+                                    {userRole === "superuser" && (
+                                        <td>
+                                            <button className="btn-delete" style={{ padding: '6px 12px' }} onClick={() => handleDeleteUser(u.id)}>🗑️</button>
+                                        </td>
+                                    )}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-        </div>
-    );
+        );
+    };
 
     const renderBloqueos = () => (
         <div className="admin-section fade-in">
@@ -285,9 +465,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <option value="">-- Agenda --</option>
                         {agendas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                     </select>
-                    <select value={newBlock.service_id} onChange={e => setNewBlock({ ...newBlock, service_id: e.target.value })}>
-                        <option value="">🔥 Todo el sistema</option>
-                        {globalServices.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                    <select value={newBlock.service_id} onChange={e => setNewBlock({ ...newBlock, service_id: e.target.value })} disabled={!newBlock.agenda_id}>
+                        <option value="">🔥 Todo el sistema de la Agenda</option>
+                        {globalServices
+                            .filter(s => allAgendaServices.some(as => as.agenda_id === newBlock.agenda_id && as.service_id === s.id))
+                            .map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)
+                        }
                     </select>
                     <input type="date" value={newBlock.fecha_inicio} onChange={e => setNewBlock({ ...newBlock, fecha_inicio: e.target.value, fecha_fin: e.target.value })} required />
                     <input type="time" value={newBlock.hora_inicio} onChange={e => setNewBlock({ ...newBlock, hora_inicio: e.target.value })} placeholder="Inicio" />
@@ -311,7 +494,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         </tr>
                     </thead>
                     <tbody>
-                        {blocks.map(b => (
+                        {blocks.filter(b => agendas.some(a => a.id === b.agenda_id)).map(b => (
                             <tr key={b.id}>
                                 <td><strong>{agendas.find(a => a.id === b.agenda_id)?.name}</strong></td>
                                 <td>{b.tipo === 2 ? <span className="role-badge agent">✅ HABILITADO</span> : <span className="role-badge danger">🚫 BLOQUEO</span>}</td>
@@ -351,11 +534,14 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             </div>
 
             <div className="grid-cards">
-                {alerts.map(al => (
+                {alerts.filter(al => agendas.some(a => a.id === al.agenda_id)).map(al => (
                     <div key={al.id} className={`premium-card alert-card ${al.tipo}`}>
                         <span className="alert-agenda-tag">{agendas.find(a => a.id === al.agenda_id)?.name}</span>
                         <p>{al.mensaje}</p>
-                        <button className="btn-delete-tiny" onClick={() => handleDeleteAlert(al.id)}>×</button>
+                        <button className="btn-delete-tiny" onClick={async () => {
+                            await supabase.from('alertas').delete().eq('id', al.id);
+                            fetchData();
+                        }}>×</button>
                     </div>
                 ))}
             </div>
@@ -372,30 +558,50 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 {/* Horarios logic... (Keeping it similar but styled) */}
                 <div className="premium-card">
                     <h4>Horarios de Atención</h4>
-                    {userRole === "superuser" ? (
+                    {(userRole === "superuser" || userRole === "admin") ? (
                         <form className="premium-form-v" onSubmit={async (e) => {
                             e.preventDefault();
                             const fd = new FormData(e.target);
-                            const { error } = await supabase.from('horarios_atencion').insert({
+                            const data = {
                                 agenda_id: parseInt(fd.get("agenda_id")),
                                 dia_semana: parseInt(fd.get("dia_semana")),
                                 hora_inicio: fd.get("hora_inicio"),
                                 hora_fin: fd.get("hora_fin")
-                            });
-                            if (!error) fetchData();
+                            };
+
+                            let error;
+                            if (editingGeneralHour) {
+                                const { error: err } = await supabase.from('horarios_atencion')
+                                    .update(data)
+                                    .eq('id', editingGeneralHour.id);
+                                error = err;
+                            } else {
+                                const { error: err } = await supabase.from('horarios_atencion').insert(data);
+                                error = err;
+                            }
+
+                            if (!error) {
+                                setEditingGeneralHour(null);
+                                e.target.reset();
+                                fetchData();
+                            }
                         }}>
-                            <select name="agenda_id" required>
+                            <select name="agenda_id" required defaultValue={editingGeneralHour?.agenda_id || ""}>
                                 <option value="">-- Agenda --</option>
                                 {agendas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                             </select>
-                            <select name="dia_semana" required>
+                            <select name="dia_semana" required defaultValue={editingGeneralHour?.dia_semana ?? ""}>
+                                <option value="" disabled>-- Día --</option>
                                 {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((d, i) => <option key={i} value={i}>{d}</option>)}
                             </select>
                             <div style={{ display: 'flex', gap: '10px' }}>
-                                <input name="hora_inicio" type="time" defaultValue="08:00" required />
-                                <input name="hora_fin" type="time" defaultValue="18:00" required />
+                                <input name="hora_inicio" type="time" defaultValue={editingGeneralHour?.hora_inicio || "08:00"} required />
+                                <input name="hora_fin" type="time" defaultValue={editingGeneralHour?.hora_fin || "18:00"} required />
                             </div>
-                            <button type="submit" className="btn-process">Añadir Horario</button>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button type="submit" className="btn-process" style={{ flex: 2 }}>{editingGeneralHour ? "💾 Guardar Cambios" : "➕ Añadir Horario"}</button>
+                                {editingGeneralHour && <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={() => setEditingGeneralHour(null)}>Cancelar</button>}
+                            </div>
                             <button
                                 type="button"
                                 className="btn-delete"
@@ -410,7 +616,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 🚫 Marcar día como CERRADO
                             </button>
                         </form>
-                    ) : <p className="text-muted" style={{ marginBottom: '15px' }}>Vista de horarios configurada por Superadmin.</p>}
+                    ) : <p className="text-muted" style={{ marginBottom: '15px' }}>Vista de horarios configurada por Admin.</p>}
 
                     <div className="mini-list">
                         {/* Agrupar por dia para mostrar los cerrados */}
@@ -430,10 +636,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                             <div key={h.id} className="mini-item-inline range-badge">
                                                 <span>{h.hora_inicio}-{h.hora_fin}</span>
                                                 <small>{agendas.find(a => a.id === h.agenda_id)?.name}</small>
-                                                <button className="btn-delete-tiny" onClick={async () => {
-                                                    await supabase.from('horarios_atencion').delete().eq('id', h.id);
-                                                    fetchData();
-                                                }}>×</button>
+                                                <div className="mini-item-actions">
+                                                    <button className="btn-edit-tiny" onClick={() => setEditingGeneralHour(h)}>✏️</button>
+                                                    <button className="btn-delete-tiny" onClick={async () => {
+                                                        await supabase.from('horarios_atencion').delete().eq('id', h.id);
+                                                        fetchData();
+                                                    }}>×</button>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -460,15 +669,10 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         className="custom-file-input"
                         style={{ flex: 1, minWidth: '250px' }}
                         value={selectedAgendaForOffers?.id || ""}
-                        onChange={async (e) => {
+                        onChange={(e) => {
                             const ag = agendas.find(a => a.id === parseInt(e.target.value));
                             setSelectedAgendaForOffers(ag);
-                            if (ag) {
-                                const { data } = await supabase.from('agenda_services').select('*, service:global_services(*)').eq('agenda_id', ag.id);
-                                setAgendaOffers(data || []);
-                            } else {
-                                setAgendaOffers([]);
-                            }
+                            fetchAgendaOffers(ag);
                         }}
                     >
                         <option value="">-- Seleccionar Agenda --</option>
@@ -479,9 +683,18 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <div className="mini-form" style={{ display: 'flex', gap: '10px', flex: 2 }}>
                             <select id="offer-service-select" className="custom-file-input" style={{ flex: 1 }}>
                                 <option value="">-- Añadir del Catálogo Maestro --</option>
-                                {globalServices.filter(gs => !agendaOffers.some(ao => ao.service_id === gs.id)).map(gs => (
-                                    <option key={gs.id} value={gs.id}>{gs.nombre} (${gs.precio_base.toLocaleString()})</option>
-                                ))}
+                                {globalServices
+                                    .filter(gs => {
+                                        // No mostrar si ya está en esta agenda
+                                        if (agendaOffers.some(ao => ao.service_id === gs.id)) return false;
+                                        // Superadmin ve todo el resto
+                                        if (userRole === "superuser") return true;
+                                        // Admin ve solo si está en alguna de sus agendas
+                                        return allAgendaServices.some(as => as.service_id === gs.id && agendas.some(ag => ag.id === as.agenda_id));
+                                    })
+                                    .map(gs => (
+                                        <option key={gs.id} value={gs.id}>{gs.nombre} (${gs.precio_base.toLocaleString()})</option>
+                                    ))}
                             </select>
                             <button className="btn-process" onClick={async () => {
                                 const sid = document.getElementById("offer-service-select").value;
@@ -534,15 +747,21 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 )}
             </div>
 
-            {userRole === "superuser" && (
-                <div className="master-catalog-section">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <h4 style={{ margin: 0 }}>🌟 Catálogo Maestro (Global)</h4>
-                        <button className="btn-process" onClick={() => setShowServiceModal({ id: 'new' })}>+ Nuevo Servicio</button>
-                    </div>
+            {/* Catálogo Maestro visible para superadmin y admin (admin solo lectura y limitado a sus servicios) */}
+            <div className="master-catalog-section">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                    <h4 style={{ margin: 0 }}>🌟 Catálogo Maestro (Global)</h4>
+                    {userRole === "superuser" && <button className="btn-process" onClick={() => setShowServiceModal({ id: 'new' })}>+ Nuevo Servicio</button>}
+                </div>
 
-                    <div className="service-premium-grid">
-                        {globalServices.map(s => (
+                <div className="service-premium-grid">
+                    {globalServices
+                        .filter(s => {
+                            if (userRole === "superuser") return true;
+                            // Para admin, mostrar solo si el servicio está en alguna de sus agendas
+                            return allAgendaServices.some(as => as.service_id === s.id && agendas.some(ag => ag.id === as.agenda_id));
+                        })
+                        .map(s => (
                             <div key={s.id} className="service-card-v2" style={{ borderTop: `4px solid ${s.color || 'var(--primary)'}` }}>
                                 {s.image_url && (
                                     <div className="service-card-img" style={{ backgroundImage: `url(${s.image_url})` }}></div>
@@ -557,32 +776,33 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         <span>⏱️ {s.duracion_minutos} min</span>
                                         <span>👥 {s.concurrency > 1 ? `${s.concurrency} cupos` : '1 cupo'}</span>
                                     </div>
-                                    <div className="service-actions">
-                                        <button className="btn-edit-v2" onClick={() => {
-                                            setEditingService({
-                                                nombre: s.nombre,
-                                                precio_base: s.precio_base,
-                                                duracion_minutos: s.duracion_minutos,
-                                                concurrency: s.concurrency || 1,
-                                                color: s.color || "#3b82f6",
-                                                image_url: s.image_url || "",
-                                                descripcion: s.descripcion || ""
-                                            });
-                                            setShowServiceModal(s);
-                                        }}>✏️ Editar</button>
-                                        <button className="btn-delete-v2" onClick={async () => {
-                                            if (confirm("¿Eliminar este servicio del catálogo maestro? Esto lo quitará de todas las agendas.")) {
-                                                const { error } = await supabase.from('global_services').delete().eq('id', s.id);
-                                                if (!error) fetchData();
-                                            }
-                                        }}>🗑️</button>
-                                    </div>
+                                    {userRole === "superuser" && (
+                                        <div className="service-actions">
+                                            <button className="btn-edit-v2" onClick={() => {
+                                                setEditingService({
+                                                    nombre: s.nombre,
+                                                    precio_base: s.precio_base,
+                                                    duracion_minutos: s.duracion_minutos,
+                                                    concurrency: s.concurrency || 1,
+                                                    color: s.color || "#3b82f6",
+                                                    image_url: s.image_url || "",
+                                                    descripcion: s.descripcion || ""
+                                                });
+                                                setShowServiceModal(s);
+                                            }}>✏️ Editar</button>
+                                            <button className="btn-delete-v2" onClick={async () => {
+                                                if (confirm("¿Eliminar este servicio del catálogo maestro? Esto lo quitará de todas las agendas.")) {
+                                                    const { error } = await supabase.from('global_services').delete().eq('id', s.id);
+                                                    if (!error) fetchData();
+                                                }
+                                            }}>🗑️</button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ))}
-                    </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 
@@ -626,31 +846,43 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <p className="text-muted">Si no defines ningún horario, el servicio sigue el horario general de la agenda. Si agregas al menos uno, SOLO estará disponible en estos rangos.</p>
 
                         <form className="premium-form-v" onSubmit={handleAddServiceHour} style={{ marginTop: '15px' }}>
-                            <select name="dia_semana" required>
+                            <select name="dia_semana" required defaultValue={editingServiceHour?.dia_semana ?? ""}>
+                                <option value="" disabled>-- Día --</option>
                                 {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((d, i) => <option key={i} value={i}>{d}</option>)}
                             </select>
                             <div style={{ display: 'flex', gap: '10px' }}>
-                                <input name="hora_inicio" type="time" required />
-                                <input name="hora_fin" type="time" required />
+                                <input name="hora_inicio" type="time" defaultValue={editingServiceHour?.hora_inicio || ""} required />
+                                <input name="hora_fin" type="time" defaultValue={editingServiceHour?.hora_fin || ""} required />
                             </div>
-                            <button type="submit" className="btn-process">Añadir Rango</button>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button type="submit" className="btn-process" style={{ flex: 2 }}>{editingServiceHour ? "💾 Guardar" : "➕ Añadir Rango"}</button>
+                                {editingServiceHour && <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={() => setEditingServiceHour(null)}>Cancelar</button>}
+                            </div>
                         </form>
 
                         <div className="mini-list" style={{ marginTop: '20px', maxHeight: '300px', overflowY: 'auto' }}>
                             {serviceHours.length === 0 ? <p className="text-muted text-center">Usa horario general</p> :
                                 serviceHours.map(h => (
                                     <div key={h.id} className="mini-item-inline range-badge">
-                                        <strong>{["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"][h.dia_semana]}</strong>: {h.hora_inicio} - {h.hora_fin}
-                                        <button className="btn-delete-tiny" onClick={async () => {
-                                            const { error } = await supabase.from('horarios_servicios').delete().eq('id', h.id);
-                                            if (!error) handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
-                                        }}>×</button>
+                                        <div style={{ flex: 1 }}>
+                                            <strong>{["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"][h.dia_semana]}</strong>: {h.hora_inicio} - {h.hora_fin}
+                                        </div>
+                                        <div className="mini-item-actions">
+                                            <button className="btn-edit-tiny" onClick={() => setEditingServiceHour(h)}>✏️</button>
+                                            <button className="btn-delete-tiny" onClick={async () => {
+                                                const { error } = await supabase.from('horarios_servicios').delete().eq('id', h.id);
+                                                if (!error) handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
+                                            }}>×</button>
+                                        </div>
                                     </div>
                                 ))}
                         </div>
 
-                        <div className="modal-actions">
-                            <button className="btn-secondary" onClick={() => setShowServiceHoursModal(null)}>Cerrar</button>
+                        <div className="modal-actions" style={{ marginTop: '20px', borderTop: '1px solid var(--glass-border)', paddingTop: '15px' }}>
+                            <button className="btn-secondary" style={{ width: '100%' }} onClick={() => {
+                                setShowServiceHoursModal(null);
+                                setEditingServiceHour(null);
+                            }}>Cerrar</button>
                         </div>
                     </div>
                 </div>
@@ -749,20 +981,32 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 <input type="text" value={newUser.username} onChange={e => setNewUser({ ...newUser, username: e.target.value })} required placeholder="ej: juan_p" />
                             </div>
                             <div className="form-group">
+                                <label>Correo Electrónico</label>
+                                <input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} required placeholder="ej: admin@correo.com" />
+                            </div>
+                            <div className="form-group">
                                 <label>Contraseña</label>
-                                <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} required placeholder="Mínimo 6 caracteres" />
+                                <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} required placeholder="Mínimo 6 caracteres" minLength="6" />
                             </div>
                             <div className="form-group">
                                 <label>Rol del Usuario</label>
-                                <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })}>
-                                    <option value="agent">Agente (Acceso limitado)</option>
-                                    <option value="admin">Administrador (Gestión básica)</option>
-                                    <option value="superuser">Superadmin (Acceso total)</option>
-                                </select>
+                                {userRole === 'superuser' ? (
+                                    <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })} className="custom-file-input">
+                                        <option value="agent">Agente</option>
+                                        <option value="admin">Administrador</option>
+                                        <option value="superuser">Super Admin</option>
+                                    </select>
+                                ) : (
+                                    <div className="role-badge agent" style={{ padding: '10px', display: 'block', textAlign: 'center' }}>
+                                        Rol: Agente (Solo puedes crear agentes)
+                                    </div>
+                                )}
                             </div>
                             <div className="modal-footer">
                                 <button type="button" className="btn-secondary" onClick={() => setShowUserModal(false)}>Cancelar</button>
-                                <button type="submit" className="btn-process">Crear Usuario</button>
+                                <button type="submit" className="btn-process" disabled={loading}>
+                                    {loading ? "Creando..." : "Crear Usuario"}
+                                </button>
                             </div>
                         </form>
                     </div>
@@ -774,32 +1018,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 <div className="modal-overlay">
                     <div className="modal-content premium-modal">
                         <h3>{showServiceModal.id === 'new' ? 'Nuevo Servicio Global' : `Editar: ${showServiceModal.nombre}`}</h3>
-                        <form onSubmit={async (e) => {
-                            e.preventDefault();
-                            const payload = {
-                                ...editingService,
-                                precio_base: parseFloat(editingService.precio_base),
-                                duracion_minutos: parseInt(editingService.duracion_minutos),
-                                concurrency: parseInt(editingService.concurrency),
-                                assign_to_agendas: showServiceModal.id === 'new' ? (new FormData(e.target)).getAll("assign_to").map(Number) : []
-                            };
-
-                            const url = showServiceModal.id === 'new'
-                                ? "http://localhost:8000/global-services"
-                                : `http://localhost:8000/global-services/${showServiceModal.id}`;
-                            const method = showServiceModal.id === 'new' ? "POST" : "PUT";
-
-                            const res = await fetch(url, {
-                                method,
-                                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-                                body: JSON.stringify(payload)
-                            });
-
-                            if (res.ok) {
-                                setShowServiceModal(null);
-                                fetchData();
-                            }
-                        }} className="premium-form">
+                        <form onSubmit={handleSaveService} className="premium-form">
                             <div className="form-group">
                                 <label>Nombre del Servicio</label>
                                 <input
