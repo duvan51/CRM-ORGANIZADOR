@@ -121,6 +121,17 @@ api.get('/health', async (req, res) => {
     }
 });
 
+api.get('/server_status', (req, res) => {
+    try {
+        const fileCoords = path.resolve('server_status.txt');
+        if (fs.existsSync(fileCoords)) {
+             res.send(fs.readFileSync(fileCoords, 'utf8') + `\nCWD: ${process.cwd()}`);
+        } else {
+             res.send(`Server running but status file not found at ${fileCoords}\nCWD: ${process.cwd()}`);
+        }
+    } catch (e) { res.send(e.message); }
+});
+
 api.post('/token', async (req, res) => {
     const { username, password } = req.body;
     const user = await User.findOne({ where: { username } });
