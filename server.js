@@ -71,7 +71,7 @@ wss.on('connection', (ws) => {
     ws.on('error', console.error);
 });
 
-const PORT = process.env.PORT || 3005;
+const PORT = process.env.PORT || 3000;
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors());

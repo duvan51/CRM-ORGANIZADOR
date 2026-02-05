@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const dbHost = process.env.DB_HOST || '127.0.0.1';
+const dbHost = process.env.DB_HOST || 'localhost';
 const dbUser = process.env.DB_USER || 'u843449532_duvanAponte';
 const dbPass = process.env.DB_PASS || 'Duvan1234789149#';
 const dbName = process.env.DB_NAME || 'u843449532_andofunnel';
