@@ -828,13 +828,15 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 <button className="btn-back-sidebar" onClick={onBack}>← Volver Agenda</button>
             </div>
 
-            <main className="admin-content">
-                {activeView === "agendas" && renderAgendas()}
-                {activeView === "users" && renderUsers()}
-                {activeView === "bloqueos" && renderBloqueos()}
-                {activeView === "alertas" && renderAlertas()}
-                {activeView === "servicios" && renderConfigServicios()}
-                {activeView === "horarios" && renderConfigHorarios()}
+            <main className="admin-content" key={activeView}>
+                <div className="admin-screen-wrapper">
+                    {activeView === "agendas" && renderAgendas()}
+                    {activeView === "users" && renderUsers()}
+                    {activeView === "bloqueos" && renderBloqueos()}
+                    {activeView === "alertas" && renderAlertas()}
+                    {activeView === "servicios" && renderConfigServicios()}
+                    {activeView === "horarios" && renderConfigHorarios()}
+                </div>
             </main>
 
             {/* MODAL: MANAGE AGENTS */}

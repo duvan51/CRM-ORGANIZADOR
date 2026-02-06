@@ -324,3 +324,70 @@
         opacity: 1;
     }
 }
+
+/* --- MOBILE OPTIMIZATIONS --- */
+@media (max-width: 768px) {
+    .confirmation-panel-container {
+        padding: 5px 0 !important;
+        width: 100%;
+        overflow-x: hidden;
+    }
+
+    .panel-title-pro {
+        padding: 0 10px;
+        font-size: 1.3rem;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+
+    .panel-subtitle {
+        padding: 0 10px;
+        margin-bottom: 15px;
+        font-size: 0.9rem;
+    }
+
+    .kanban-board-pro {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 15px;
+        width: 100%;
+        padding: 0;
+    }
+
+    .kanban-column-pro {
+        max-width: 100% !important;
+        min-width: 100% !important;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        max-height: none !important;
+    }
+
+    .column-header-pro {
+        padding: 12px;
+    }
+
+    .column-content-pro {
+        padding: 8px 4px;
+        gap: 10px;
+    }
+
+    .confirmation-card-pro {
+        width: 100% !important;
+        box-sizing: border-box;
+        border-radius: 4px;
+        margin: 0;
+    }
+
+    .card-pro-actions {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .btn-pro-icon,
+    .btn-pro-action.confirm {
+        width: 100% !important;
+        text-align: center;
+    }
+}

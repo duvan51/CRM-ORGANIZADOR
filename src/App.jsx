@@ -11,24 +11,24 @@ import ConfirmationPanel from "./components/ConfirmationPanel.jsx";
 import SalesCounter from "./components/SalesCounter.jsx";
 import useWebSocket from "./hooks/useWebSocket.js";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
-  <div style={{ marginBottom: "30px", padding: "20px", background: "var(--input-bg)", borderRadius: "16px", border: "1px solid var(--glass-border)" }}>
-    <h4 style={{ marginBottom: "15px" }}>Columnas a unificar:</h4>
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "15px" }}>
+  <div className="field-manager-container">
+    <h4 className="field-manager-title">Columnas a unificar:</h4>
+    <div className="field-list">
       {fields.map(f => (
-        <span key={f} style={{ background: "var(--primary)", padding: "5px 12px", borderRadius: "20px", fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "8px" }}>
-          {f} <button onClick={() => removeField(f)} style={{ background: "none", border: "none", color: "white", cursor: "pointer", fontWeight: "bold" }}>×</button>
+        <span key={f} className="field-badge">
+          {f} <button onClick={() => removeField(f)} className="field-remove-btn">×</button>
         </span>
       ))}
     </div>
-    <div style={{ display: "flex", gap: "10px" }}>
+    <div className="field-add-control">
       <input
         type="text"
-        placeholder="Añadir columna (ej: correo, fono)"
+        placeholder="Añadir columna"
         value={newFieldName}
         onChange={e => setNewFieldName(e.target.value)}
-        style={{ flex: 1, padding: "8px 12px", background: "var(--input-bg)", border: "1px solid var(--glass-border)", borderRadius: "8px", color: "var(--text-main)" }}
+        className="field-add-input"
       />
-      <button className="btn-process" style={{ padding: "8px 20px", fontSize: "0.9rem" }} onClick={addField}>+ Añadir</button>
+      <button className="btn-process btn-add-field" onClick={addField}>+ Añadir</button>
     </div>
   </div>
 );
@@ -321,9 +321,9 @@ function App() {
           <FieldManager fields={fields} newFieldName={newFieldName} setNewFieldName={setNewFieldName} addField={addField} removeField={removeField} />
           <div className="upload-section">
             <input type="file" multiple accept=".xlsx,.xls" onChange={(e) => setFiles(e.target.files)} className="custom-file-input" />
-            <div style={{ display: "flex", gap: "10px", marginTop: "15px" }}>
+            <div className="crm-actions-wrapper">
               <button className="btn-process" onClick={() => uploadFiles(false)} disabled={loading || !files}>Analizar</button>
-              <button className="btn-process" style={{ background: "#ef4444" }} onClick={clearAllFiles}>Limpiar</button>
+              <button className="btn-process" style={{ background: "rgba(239, 68, 68, 0.1)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.2)" }} onClick={clearAllFiles}>Limpiar</button>
             </div>
           </div>
         </>
@@ -334,17 +334,16 @@ function App() {
           {analysis.map((file, idx) => (
             <div key={idx} style={{ marginBottom: "20px", padding: "15px", border: "1px solid var(--glass-border)", borderRadius: "8px" }}>
               <h4>{file.filename}</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "10px" }}>
                 {file.columns.map(col => {
                   const suggested = autoSuggestForField(fields, col);
                   return (
-                    <div key={col} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span>{col}</span>
+                    <div key={col} className="mapping-row">
+                      <span className="mapping-label">{col}</span>
                       <select
                         value={mapping[col] || suggested || ""}
                         onChange={e => setMapping({ ...mapping, [col]: e.target.value })}
-                        className="custom-file-input"
-                        style={{ width: "50%" }}
+                        className="custom-file-input mapping-select"
                       >
                         <option value="">-- Ignorar --</option>
                         {fields.map(f => <option key={f} value={f}>{f}</option>)}
@@ -398,59 +397,71 @@ function App() {
 
   return (
     <div className="container">
-      <header className="header" style={{ position: "relative" }}>
+      <header className="header">
+        <div className="header-top">
+          <h1>CRM Organizador</h1>
+          <div className="header-controls">
+            {activeTab === "agenda" && <div className="hide-mobile"><SalesCounter /></div>}
 
-        {/* Theme Toggle (Top Left) */}
-        <div style={{ position: "absolute", top: 10, left: 20 }}>
-          <button
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="btn-secondary"
-            style={{ padding: "5px", fontSize: "1.2rem", borderRadius: "50%", width: "40px", height: "40px", display: "flex", alignItems: "center", justifyContent: "center" }}
-            title={`Cambiar a modo ${theme === "dark" ? "claro" : "oscuro"}`}
-          >
-            {theme === "dark" ? "☀️" : "🌙"}
-          </button>
+            <button
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="btn-secondary"
+              style={{
+                padding: "0",
+                fontSize: "1.2rem",
+                borderRadius: "12px",
+                width: "40px",
+                height: "40px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "var(--btn-secondary-bg)",
+                border: "1px solid var(--glass-border)",
+                color: "var(--text-main)",
+                cursor: "pointer"
+              }}
+              title={`Cambiar a modo ${theme === "dark" ? "claro" : "oscuro"}`}
+            >
+              {theme === "dark" ? "☀️" : "🌙"}
+            </button>
+
+            <button className="btn-logout" onClick={() => { handleLogout(); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+              <span className="hide-mobile">Salir ({user.username})</span>
+            </button>
+          </div>
         </div>
-
-        {/* User Controls (Top Right) */}
-        <div style={{ position: "absolute", top: 10, right: 20, display: "flex", alignItems: "center", gap: "10px" }}>
-          {activeTab === "agenda" && <SalesCounter />}
-          <button className="btn-logout" onClick={() => { handleLogout(); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            Salir ({user.username})
-          </button>
-        </div>
-
-        <h1>CRM Organizador</h1>
 
         <div className="nav-tabs">
-          <div className={`nav-tab ${activeTab === "crm" ? "active" : ""}`} onClick={() => setActiveTab("crm")}>Procesador CRM</div>
-          <div className={`nav-tab ${activeTab === "agenda" ? "active" : ""}`} onClick={() => setActiveTab("agenda")}>Agenda Multi-Agente</div>
+          <div className={`nav-tab ${activeTab === "crm" ? "active" : ""}`} onClick={() => setActiveTab("crm")}>
+            <span className="tab-icon">📊</span> <span className="tab-text">CRM</span>
+          </div>
+          <div className={`nav-tab ${activeTab === "agenda" ? "active" : ""}`} onClick={() => setActiveTab("agenda")}>
+            <span className="tab-icon">📅</span> <span className="tab-text">Agenda</span>
+          </div>
 
           <div
             className={`nav-tab ${activeTab === "confirmaciones" ? "active" : ""}`}
             onClick={() => { setActiveTab("confirmaciones"); setPendingConfirmations(0); }}
-            style={{ position: "relative", display: "flex", alignItems: "center", gap: "8px" }}
+            style={{ position: "relative" }}
           >
-            Confirmaciones
-            <div className={`bell-icon ${pendingConfirmations > 0 ? "shaking" : ""}`} style={{ fontSize: '1.2rem' }}>
-              🔔
-              {pendingConfirmations > 0 && <span className="bell-badge" style={{ top: -5, right: -5, width: 16, height: 16, fontSize: '0.65rem' }}>{pendingConfirmations}</span>}
-            </div>
+            <span className="tab-icon">🔔</span> <span className="tab-text">Confirmar</span>
+            {pendingConfirmations > 0 && <span className="bell-badge">{pendingConfirmations}</span>}
           </div>
 
           {(user.role === "superuser" || user.role === "admin") && (
-            <div className={`nav-tab ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}>Panel Control</div>
+            <div className={`nav-tab ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}>
+              <span className="tab-icon">⚙️</span> <span className="tab-text">Admin</span>
+            </div>
           )}
         </div>
 
         {activeTab === "agenda" && user.agendas?.length > 0 && (
           <div className="agenda-tabs-container">
-            <span className="tabs-label">Agenda:</span>
             <div className="agenda-tabs">
               {user.agendas.map(a => (
                 <button
@@ -462,7 +473,7 @@ function App() {
                 </button>
               ))}
             </div>
-            {user.role === "superuser" && <span className="superuser-badge">(Superusuario)</span>}
+            {user.role === "superuser" && <span className="superuser-badge">Super</span>}
           </div>
         )}
       </header>
