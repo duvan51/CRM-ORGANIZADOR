@@ -1,26 +1,48 @@
-/* --- SALES COUNTER --- */
+.sales-stats-container {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-right: 15px;
+}
+
 .sales-counter {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    /* Align right */
-    background: rgba(16, 185, 129, 0.1);
-    border: 1px solid rgba(16, 185, 129, 0.2);
     padding: 5px 12px;
-    border-radius: 10px;
-    margin-right: 15px;
+    border-radius: 12px;
     position: relative;
     transition: all 0.3s ease;
     cursor: default;
+    min-width: 100px;
 }
 
-.sales-counter:hover {
+.sales-counter.success {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.sales-counter.success:hover {
     background: rgba(16, 185, 129, 0.2);
-    transform: scale(1.05);
+    transform: translateY(-2px);
+}
+
+.sales-counter.danger {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.sales-counter.danger .sales-label {
+    color: #ef4444;
+}
+
+.sales-counter.danger:hover {
+    background: rgba(239, 68, 68, 0.2);
+    transform: translateY(-2px);
 }
 
 .sales-label {
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     color: #10b981;
     font-weight: 700;
     text-transform: uppercase;
@@ -28,7 +50,7 @@
 }
 
 .sales-amount {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 800;
     color: var(--text-main);
 }

@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../supabase";
+import ConfirmModal from "./ConfirmModal";
 
-const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEditCita }) => {
+const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, onEditCita, onScheduleNext }) => {
 
 
 
@@ -24,6 +25,15 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
 
 
     const [viewMode, setViewMode] = useState("month"); // "month", "week", "day"
+    const [selectedDayOptions, setSelectedDayOptions] = useState(null);
+    const [confirmModal, setConfirmModal] = useState({
+        isOpen: false,
+        title: "",
+        message: "",
+        icon: "",
+        type: "confirm",
+        onConfirm: () => { }
+    });
 
     useEffect(() => {
         if (agendaId) {
@@ -80,8 +90,7 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
             const { data, error } = await supabase
                 .from('alertas')
                 .select('*')
-                .eq('agenda_id', agendaId)
-                .eq('activa', 1);
+                .eq('agenda_id', agendaId);
 
             if (error) throw error;
             setAlertas(data || []);
@@ -225,42 +234,29 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
     };
 
 
-    const handleQuickBlock = async (date) => {
-        const dateStr = date.toISOString().split('T')[0];
-        const motive = prompt("Motivo del bloqueo (ej: Fuera de servicio, Almuerzo):", "Fuera de servicio");
-        if (motive === null) return;
 
-        try {
-            const { error } = await supabase
-                .from('bloqueos')
-                .insert({
-                    agenda_id: agendaId,
-                    fecha_inicio: dateStr,
-                    fecha_fin: dateStr,
-                    es_todo_el_dia: 1,
-                    motivo: motive
-                });
+    const handleDeleteCita = (citaId) => {
+        setConfirmModal({
+            isOpen: true,
+            title: "Eliminar Cita",
+            message: "¿Deseas eliminar permanentemente esta cita? Esta acción no se puede deshacer.",
+            icon: "🗑️",
+            type: "danger",
+            onConfirm: async () => {
+                try {
+                    const { error } = await supabase
+                        .from('citas')
+                        .delete()
+                        .eq('id', citaId);
 
-            if (error) throw error;
-            alert("Horario bloqueado correctamente");
-            fetchBloqueos();
-        } catch (e) { console.error(e); }
-    };
-
-    const handleDeleteCita = async (citaId) => {
-        if (!confirm("¿Estás seguro de que deseas eliminar esta cita?")) return;
-        try {
-            const { error } = await supabase
-                .from('citas')
-                .delete()
-                .eq('id', citaId);
-
-            if (error) throw error;
-            fetchCitas();
-        } catch (e) {
-            console.error(e);
-            alert("Error al eliminar");
-        }
+                    if (error) throw error;
+                    fetchCitas();
+                } catch (e) {
+                    console.error(e);
+                    alert("Error al eliminar");
+                }
+            }
+        });
     };
 
     const canModify = (cita) => {
@@ -270,14 +266,29 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
         return citaDate > now;
     };
 
+    const handleQuickBlock = async (date) => {
+        const dateStr = getLocalDateStr(date);
+        try {
+            const { error } = await supabase.from('bloqueos').insert({
+                agenda_id: agendaId,
+                tipo: 1,
+                fecha_inicio: dateStr,
+                fecha_fin: dateStr,
+                es_todo_el_dia: true,
+                descripcion: "Bloqueo rápido desde calendario"
+            });
+            if (error) throw error;
+            fetchBloqueos();
+        } catch (e) {
+            console.error(e);
+            alert("Error al bloquear día");
+        }
+    };
+
     const handleDayClick = (date) => {
         if (userRole === "superuser" || userRole === "admin") {
-            const action = confirm("¿Qué deseas hacer?\n\nACEPTAR: Agendar Cita\nCANCELAR: Poner Fuera de Servicio (Bloquear día)");
-            if (action) onDateSelect(date);
-            else handleQuickBlock(date);
+            setSelectedDayOptions(date);
         } else {
-            // RELAX CONCURRENCY BLOCK: Permitir abrir el formulario siempre si es laborativo
-            // El backend y el formulario se encargarán de la validación final.
             onDateSelect(date);
         }
     };
@@ -290,44 +301,76 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth();
         const firstDay = new Date(year, month, 1).getDay();
+        const startOffset = (firstDay + 6) % 7; // Ajustar para que la semana empiece en Lunes
         const daysInMonth = getDaysInMonth(year, month);
+        const todayStr = getLocalDateStr(new Date());
 
         const days = [];
         const weekDays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
-        for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>);
+        // Días del mes anterior para rellenar el inicio
+        const prevMonthLastDay = new Date(year, month, 0).getDate();
+        for (let i = startOffset - 1; i >= 0; i--) {
+            const dayNum = prevMonthLastDay - i;
+            const dateObj = new Date(year, month - 1, dayNum);
+            days.push(
+                <div key={`prev-${dayNum}`} className="calendar-day other-month" onClick={() => {
+                    const d = new Date(year, month - 1, dayNum);
+                    setCurrentDate(d);
+                }}>
+                    <span className="day-number">{dayNum}</span>
+                </div>
+            );
+        }
+
+        // Días del mes actual
         for (let d = 1; d <= daysInMonth; d++) {
             const dateObj = new Date(year, month, d);
             const dateStr = getLocalDateStr(dateObj);
+            const isToday = dateStr === todayStr;
             const dayOfWeek = (dateObj.getDay() + 6) % 7;
 
             const dayCitas = citas.filter(c => c.fecha === dateStr);
             const isBlocked = (bloqueos || []).some(b => b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr && b.es_todo_el_dia && b.tipo === 1);
-
-            // La disponibilidad real del día la decide el helper unificado
             const isAvailable = isAnyTimeAllowedOnDay(dateObj);
-
-            // Un día está "cerrado" si no hay ninguna regla que lo abra (general, servicio o excepción)
             const isClosed = !isAvailable;
-
-            // Si hay un filtro, el color de 'no disponible' se aplica si ese servicio específico no puede operar
             const isUnavailableByFilter = serviceFilter && !isAvailable;
 
             days.push(
-                <div key={d} className={`calendar-day ${isBlocked ? 'blocked-day' : ''} ${isClosed ? 'closed-day' : ''} ${isUnavailableByFilter ? 'unavailable-filter' : ''}`} onClick={() => handleDayClick(new Date(year, month, d))}>
+                <div key={`curr-${d}`} className={`calendar-day ${isToday ? 'today' : ''} ${isBlocked ? 'blocked-day' : ''} ${isClosed ? 'closed-day' : ''} ${isUnavailableByFilter ? 'unavailable-filter' : ''}`} onClick={() => handleDayClick(new Date(year, month, d))}>
                     <span className="day-number">{d}</span>
                     <div className="day-appointments">
                         {isBlocked ? <div className="blocked-label">No disponible</div> : (
                             isClosed ? <div className="closed-label">No laborativo</div> : (
                                 <>
                                     {dayCitas.slice(0, 3).map(c => (
-                                        <div key={c.id} className="appointment-pill">{c.hora} {c.nombres_completos.split(' ')[0]}</div>
+                                        <div
+                                            key={c.id}
+                                            className={`appointment-pill ${c.confirmacion === 'Cancelada' ? 'cancelled-pill' : ''}`}
+                                            title={c.confirmacion === 'Cancelada' ? 'Cita Cancelada' : ''}
+                                        >
+                                            {c.confirmacion === 'Cancelada' && '⚠️ '}{c.hora} {c.nombres_completos.split(' ')[0]}
+                                        </div>
                                     ))}
                                     {dayCitas.length > 3 && <div style={{ fontSize: "0.6rem", color: "var(--primary)" }}>+{dayCitas.length - 3} más</div>}
                                 </>
                             )
                         )}
                     </div>
+                </div>
+            );
+        }
+
+        // Días del mes siguiente para rellenar hasta completar la grilla (6 semanas = 42 días)
+        const totalCells = 42;
+        const remainingCells = totalCells - days.length;
+        for (let d = 1; d <= remainingCells; d++) {
+            days.push(
+                <div key={`next-${d}`} className="calendar-day other-month" onClick={() => {
+                    const date = new Date(year, month + 1, d);
+                    setCurrentDate(date);
+                }}>
+                    <span className="day-number">{d}</span>
                 </div>
             );
         }
@@ -428,7 +471,8 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                                     {new Intl.DateTimeFormat('es-ES', { weekday: 'short', day: 'numeric' }).format(date)}
                                 </div>
                                 {visibleHours.map(h => {
-                                    const slotCitas = dayCitas.filter(c => c.hora.startsWith(h.substring(0, 2)));
+                                    const activeCitas = dayCitas.filter(c => c.hora.startsWith(h.substring(0, 2)) && c.confirmacion !== 'Cancelada');
+                                    const allCitasInSlot = dayCitas.filter(c => c.hora.startsWith(h.substring(0, 2)));
 
                                     // La disponibilidad real la decide el helper unificado
                                     const isSlotAllowed = isTimeAllowedForService(date, h);
@@ -437,12 +481,12 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                                     // Para las rayas de "no laborativo" usamos la agenda general (filtro null)
                                     const isBaseWorkHour = isTimeAllowedForService(date, h, null);
 
-                                    const freeSlots = maxSlots - slotCitas.length;
+                                    const freeSlots = maxSlots - activeCitas.length;
 
                                     return (
                                         <div
                                             key={h}
-                                            className={`time-slot ${!isSlotAllowed && !isServiceBlocked ? 'blocked-slot' : ''} ${!isBaseWorkHour ? 'non-work-slot' : ''} ${slotCitas.length === 0 ? 'empty-slot' : ''} ${isServiceBlocked ? 'service-blocked' : ''}`}
+                                            className={`time-slot ${!isSlotAllowed && !isServiceBlocked ? 'blocked-slot' : ''} ${!isBaseWorkHour ? 'non-work-slot' : ''} ${activeCitas.length === 0 ? 'empty-slot' : ''} ${isServiceBlocked ? 'service-blocked' : ''}`}
                                             onClick={() => {
                                                 if (isServiceBlocked) {
                                                     alert("El servicio seleccionado no está disponible en este horario.");
@@ -453,20 +497,31 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                                             }}
                                             style={isServiceBlocked ? { opacity: 0.3, background: '#000' } : {}}
                                         >
-                                            {slotCitas.map(c => (
-                                                <div key={c.id} className="appointment-pill compact" title={c.nombres_completos}>
-                                                    {c.nombres_completos.split(' ')[0]}
-                                                    {canModify(c) && (
+                                            {allCitasInSlot.map(c => (
+                                                <div
+                                                    key={c.id}
+                                                    className={`appointment-pill compact ${c.confirmacion === 'Cancelada' ? 'cancelled-pill' : ''}`}
+                                                    title={c.nombres_completos}
+                                                >
+                                                    {c.confirmacion === 'Cancelada' && '⚠️ '}{c.nombres_completos.split(' ')[0]}
+                                                    {canModify(c) && c.confirmacion !== 'Cancelada' && (
                                                         <span
                                                             onClick={(e) => { e.stopPropagation(); onEditCita(c); }}
                                                             style={{ marginLeft: '5px', cursor: 'pointer', opacity: 0.7 }}
                                                         >✏️</span>
                                                     )}
+                                                    {canModify(c) && c.confirmacion !== 'Cancelada' && (
+                                                        <span
+                                                            onClick={(e) => { e.stopPropagation(); onScheduleNext(c); }}
+                                                            style={{ marginLeft: '5px', cursor: 'pointer', opacity: 0.7 }}
+                                                            title="Agendar Siguiente Sesión"
+                                                        >📅</span>
+                                                    )}
                                                 </div>
                                             ))}
                                             {isSlotAllowed && (
                                                 <div className="available-indicator">
-                                                    {slotCitas.length === 0 ? "Libre" : `+${freeSlots}`}
+                                                    {activeCitas.length === 0 ? "Libre" : (freeSlots > 0 ? `+${freeSlots}` : "Lleno")}
                                                 </div>
                                             )}
                                             {!isSlotAllowed && !isBaseWorkHour && <div className="non-work-stripe"></div>}
@@ -493,39 +548,27 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
 
         const workHours = HOURS.filter(h => {
             const h5 = h.substring(0, 5);
-            // 1. Horario general agenda
-            const inGeneral = (horarios || []).some(hor =>
-                hor.dia_semana === dayOfWeek &&
-                hor.agenda_id === agendaId &&
-                (hor.hora_inicio || "").substring(0, 5) <= h5 &&
-                (hor.hora_fin || "").substring(0, 5) > h5
-            );
 
-            // 2. Horario servicio filtrado
-            let inService = false;
-            if (sFilter) {
-                const hasRules = (horariosServicios || []).some(hs => hs.service_id === sFilter);
-                if (hasRules) {
-                    inService = (horariosServicios || []).some(hs =>
-                        hs.service_id === sFilter &&
-                        hs.dia_semana === dayOfWeek &&
-                        (hs.hora_inicio || "").substring(0, 5) <= h5 &&
-                        (hs.hora_fin || "").substring(0, 5) > h5
-                    );
-                } else {
-                    inService = inGeneral; // Hereda general si no tiene reglas
-                }
+            // Si hay un filtro de servicio, verificamos si es laborativo o habilitado
+            const isAllowed = isTimeAllowedForService(currentDate, h);
+
+            // Si no hay filtro, queremos ver al menos el horario general o cualquier habilitación
+            if (!serviceFilter) {
+                const inGeneral = (horarios || []).some(hor =>
+                    hor.dia_semana === dayOfWeek &&
+                    hor.agenda_id === agendaId &&
+                    (hor.hora_inicio || "").substring(0, 5) <= h5 &&
+                    (hor.hora_fin || "").substring(0, 5) > h5
+                );
+                const inEnablement = (bloqueos || []).some(b =>
+                    b.tipo === 2 &&
+                    b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
+                    (b.es_todo_el_dia || ((b.hora_inicio || "").substring(0, 5) <= h5 && (b.hora_fin || "").substring(0, 5) > h5))
+                );
+                return inGeneral || inEnablement;
             }
 
-            // 3. Habilitaciones
-            const inEnablement = (bloqueos || []).some(b =>
-                b.tipo === 2 &&
-                b.fecha_inicio <= dateStr && b.fecha_fin >= dateStr &&
-                (b.service_id === null || (sFilter && b.service_id === sFilter)) &&
-                (b.es_todo_el_dia || ((b.hora_inicio || "").substring(0, 5) <= h5 && (b.hora_fin || "").substring(0, 5) > h5))
-            );
-
-            return (sFilter ? (inService || inEnablement) : (inGeneral || inEnablement));
+            return isAllowed;
         });
 
         return (
@@ -543,15 +586,16 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                     </div>
                     <div className="day-column single">
                         {workHours.map(h => {
-                            const slotCitas = dayCitas.filter(c => c.hora.startsWith(h.substring(0, 2)));
+                            const activeCitas = dayCitas.filter(c => c.hora.startsWith(h.substring(0, 2)) && c.confirmacion !== 'Cancelada');
+                            const allCitasInSlot = dayCitas.filter(c => c.hora.startsWith(h.substring(0, 2)));
                             const isAllowed = isTimeAllowedForService(currentDate, h);
                             const isServiceBlocked = serviceFilter && !isAllowed;
-                            const freeSlots = maxSlots - slotCitas.length;
+                            const freeSlots = maxSlots - activeCitas.length;
 
                             return (
                                 <div
                                     key={h}
-                                    className={`time-slot large ${!isAllowed && !isServiceBlocked ? 'blocked-slot' : ''} ${slotCitas.length === 0 ? 'empty-slot' : ''} ${isServiceBlocked ? 'service-blocked' : ''}`}
+                                    className={`time-slot large ${!isAllowed && !isServiceBlocked ? 'blocked-slot' : ''} ${activeCitas.length === 0 ? 'empty-slot' : ''} ${isServiceBlocked ? 'service-blocked' : ''}`}
                                     onClick={() => {
                                         if (isServiceBlocked) {
                                             alert("El servicio seleccionado no está disponible en este horario.");
@@ -561,9 +605,14 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                                     }}
                                     style={isServiceBlocked ? { opacity: 0.3, background: '#000' } : {}}
                                 >
-                                    {slotCitas.map(c => (
-                                        <div key={c.id} className="appointment-pill detail" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                            <div>
+                                    {allCitasInSlot.map(c => (
+                                        <div
+                                            key={c.id}
+                                            className={`appointment-pill detail ${c.confirmacion === 'Cancelada' ? 'cancelled-pill' : ''}`}
+                                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                                        >
+                                            <div style={c.confirmacion === 'Cancelada' ? { textDecoration: 'line-through' } : {}}>
+                                                {c.confirmacion === 'Cancelada' && '⚠️ '}
                                                 <strong>{c.hora}</strong> - {c.nombres_completos} ({c.servicios})
                                             </div>
                                             <div style={{ display: 'flex', gap: '8px' }}>
@@ -579,9 +628,20 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                                                 )}
                                                 {canModify(c) && (
                                                     <button
+                                                        onClick={(e) => { e.stopPropagation(); onScheduleNext(c); }}
+                                                        className="btn-edit-tiny"
+                                                        style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+                                                        title="Agendar Siguiente Sesión"
+                                                    >
+                                                        📅
+                                                    </button>
+                                                )}
+                                                {canModify(c) && (
+                                                    <button
                                                         onClick={(e) => { e.stopPropagation(); handleDeleteCita(c.id); }}
                                                         className="btn-delete-tiny"
                                                         title="Eliminar cita"
+                                                        style={{ position: 'relative', top: 'auto', right: 'auto', marginLeft: '5px', transform: 'none' }}
                                                     >
                                                         ×
                                                     </button>
@@ -591,7 +651,7 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
                                     ))}
                                     {isAllowed && (
                                         <div className="available-indicator large">
-                                            {slotCitas.length === 0 ? "🟢 Horario Disponible - Haz clic para agendar" : `🔵 ${freeSlots} cupos disponibles`}
+                                            {activeCitas.length === 0 ? "🟢 Horario Disponible - Haz clic para agendar" : `🔵 ${freeSlots} cupos disponibles`}
                                         </div>
                                     )}
                                     {!isAllowed && <div className="blocked-stripe full"></div>}
@@ -671,6 +731,50 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, userRole, onEdit
             </div>
 
             {loading && <div className="spinner-overlay"><div className="spinner"></div></div>}
+
+            {/* Modal de Opciones de Día para Administradores */}
+            {selectedDayOptions && (
+                <div className="modal-overlay" onClick={() => setSelectedDayOptions(null)}>
+                    <div className="modal-content alert-modal-content" onClick={e => e.stopPropagation()}>
+                        <span className="alert-modal-icon">📅</span>
+                        <h3 className="alert-modal-title">Gestión de Fecha</h3>
+                        <p className="alert-modal-text">Selecciona una acción para el <strong>{selectedDayOptions.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong></p>
+
+                        <div className="alert-modal-actions" style={{ flexDirection: 'column', gap: '12px' }}>
+                            <button className="alert-modal-btn confirm" onClick={() => {
+                                onDateSelect(selectedDayOptions);
+                                setSelectedDayOptions(null);
+                            }}>
+                                ✨ Agendar Nueva Cita
+                            </button>
+
+                            <button className="alert-modal-btn danger" onClick={() => {
+                                handleQuickBlock(selectedDayOptions);
+                                setSelectedDayOptions(null);
+                            }}>
+                                🚫 Bloquear Día Completo
+                            </button>
+
+                            <button className="alert-modal-btn cancel" onClick={() => setSelectedDayOptions(null)} style={{ border: 'none', background: 'transparent', marginTop: '10px' }}>
+                                Cancelar y Volver
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                onConfirm={confirmModal.onConfirm}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                icon={confirmModal.icon}
+                type={confirmModal.type}
+                confirmText={confirmModal.type === 'danger' ? "Eliminar" : "Confirmar"}
+            />
+
+
         </div>
 
     );

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../supabase";
+import "../login_premium.css";
 
 const Login = ({ onLoginSuccess }) => {
     const [username, setUsername] = useState("");
@@ -13,7 +14,6 @@ const Login = ({ onLoginSuccess }) => {
         setError("");
 
         try {
-            // Limpiamos espacios accidentales
             const cleanEmail = username.trim();
             const cleanPassword = password.trim();
 
@@ -24,7 +24,6 @@ const Login = ({ onLoginSuccess }) => {
 
             if (error) throw error;
 
-            // Obtener perfil detallado (roles, agendas, etc.)
             const { data: profile, error: profileError } = await supabase
                 .from('profiles')
                 .select(`
@@ -37,13 +36,11 @@ const Login = ({ onLoginSuccess }) => {
                 .single();
 
             if (profileError) {
-                // Si no hay perfil, creamos un objeto básico
                 onLoginSuccess({ username: data.user.email, role: 'agent', agendas: [] });
             } else {
-                // Formatear agendas para el frontend
                 const formattedUser = {
                     ...profile,
-                    agendas: profile.agendas.map(a => a.agendas)
+                    agendas: profile.agendas ? profile.agendas.map(a => a.agendas) : []
                 };
                 onLoginSuccess(formattedUser);
             }
@@ -57,10 +54,14 @@ const Login = ({ onLoginSuccess }) => {
     };
 
     return (
-        <div className="modal-overlay">
-            <div className="modal-content" style={{ maxWidth: "400px" }}>
-                <h2 style={{ textAlign: "center", marginBottom: "24px" }}>Acceso Agentes</h2>
-                <form onSubmit={handleSubmit}>
+        <div className="login-container">
+            <div className="login-card">
+                <div className="login-brand">
+                    <h1>CRM Admin</h1>
+                    <p>Acceso Profesional</p>
+                </div>
+
+                <form className="login-form" onSubmit={handleSubmit}>
                     <div className="form-group">
                         <label>Correo Electrónico</label>
                         <input
@@ -71,7 +72,8 @@ const Login = ({ onLoginSuccess }) => {
                             placeholder="tu@correo.com"
                         />
                     </div>
-                    <div className="form-group" style={{ marginTop: "15px" }}>
+
+                    <div className="form-group">
                         <label>Contraseña</label>
                         <input
                             type="password"
@@ -81,19 +83,25 @@ const Login = ({ onLoginSuccess }) => {
                             placeholder="••••••••"
                         />
                     </div>
-                    {error && <p style={{ color: "#f87171", fontSize: "0.85rem", marginTop: "10px" }}>{error}</p>}
+
+                    {error && <div className="fade-in" style={{ color: "#f87171", fontSize: "0.85rem", textAlign: "center", background: "rgba(239, 68, 68, 0.1)", padding: "10px", borderRadius: "8px" }}>{error}</div>}
+
                     <button
                         type="submit"
                         className="btn-process"
-                        style={{ width: "100%", marginTop: "24px", justifyContent: "center" }}
+                        style={{ width: "100%", justifyContent: "center", padding: "15px", fontSize: "1rem" }}
                         disabled={loading}
                     >
-                        {loading ? <div className="spinner" /> : "Ingresar"}
+                        {loading ? <div className="spinner" /> : "Iniciar Sesión"}
                     </button>
                 </form>
-                <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "20px", textAlign: "center" }}>
-                    Credenciales por defecto: admin / admin123
-                </p>
+
+                <div className="login-footer">
+                    <p>
+                        Usa tus credenciales autorizadas.<br />
+                        Default: <code>admin@test.com</code> / <code>admin123</code>
+                    </p>
+                </div>
             </div>
         </div>
     );

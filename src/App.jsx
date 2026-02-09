@@ -9,7 +9,12 @@ import Login from "./components/Login.jsx";
 import AdminPanel from "./components/AdminPanel.jsx";
 import ConfirmationPanel from "./components/ConfirmationPanel.jsx";
 import SalesCounter from "./components/SalesCounter.jsx";
+import AgentDashboard from "./components/AgentDashboard.jsx";
 import useWebSocket from "./hooks/useWebSocket.js";
+import PatientTracking from "./components/PatientTracking.jsx";
+import MasterPanel from "./components/MasterPanel.jsx";
+import SubscriptionManager from "./components/SubscriptionManager.jsx";
+import QuickScheduleModal from "./components/QuickScheduleModal.jsx";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div className="field-manager-container">
     <h4 className="field-manager-title">Columnas a unificar:</h4>
@@ -42,6 +47,13 @@ function App() {
   const [files, setFiles] = useState(null);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
+
+  useEffect(() => {
+    if (user?.role === 'owner') {
+      setActiveTab('master');
+    }
+  }, [user]);
+
   const [fields, setFields] = useState(["nombre", "fecha", "servicios"]);
   const [newFieldName, setNewFieldName] = useState("");
   const [selection, setSelection] = useState({});
@@ -58,22 +70,41 @@ function App() {
   const [activeAgenda, setActiveAgenda] = useState(null);
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
   const [pendingConfirmations, setPendingConfirmations] = useState(0); // For the bell
+  const [pendingReschedule, setPendingReschedule] = useState(null);
 
   useEffect(() => {
     const checkPending = async () => {
+      if (!user) return;
       try {
         const today = new Date().toISOString().split('T')[0];
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
-        const { count, error } = await supabase
+        let query = supabase
           .from('citas')
           .select('*', { count: 'exact', head: true })
           .neq('confirmacion', 'Confirmada')
           .neq('confirmacion', 'Cancelada')
           .gte('fecha', today)
           .lte('fecha', tomorrowStr);
+
+        // Filter by user's allowed agendas (strict isolation)
+        if (user.agendas && user.agendas.length > 0) {
+          const agendaIds = user.agendas.map(a => a.id);
+          query = query.in('agenda_id', agendaIds);
+        } else {
+          // If no agendas, no confirmations
+          setPendingConfirmations(0);
+          return;
+        }
+
+        if (user.role !== 'superuser' && user.role !== 'admin' && user.role !== 'owner') {
+          const sellerName = user.full_name || user.username;
+          query = query.ilike('vendedor', sellerName);
+        }
+
+        const { count, error } = await query;
 
         if (!error) setPendingConfirmations(count || 0);
       } catch (e) { console.error(e); }
@@ -82,7 +113,7 @@ function App() {
     checkPending();
     const interval = setInterval(checkPending, 60000); // Cada minuto
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     document.body.setAttribute("data-theme", theme);
@@ -140,17 +171,35 @@ function App() {
 
       if (!profile) {
         console.warn("⚠️ Perfil no encontrado para el usuario:", session.user.id);
-        // Podrías crear un perfil por defecto aquí o cerrar sesión
         setUser({ id: session.user.id, username: session.user.email, full_name: "Usuario Nuevo", agendas: [] });
         return;
       }
 
+      let userAgendas = [];
+
+      // LOGIC: If SuperUser, fetch ALL agendas for their clinic.
+      if (profile.role === 'superuser') {
+        // Clinic ID for superuser is likely their own ID if they are the root, or specified in clinic_id
+        const clinicId = profile.clinic_id || profile.id;
+        const { data: allAgendas } = await supabase.from('agendas').select('*').eq('clinic_id', clinicId);
+        userAgendas = allAgendas || [];
+      } else {
+        // For Admins/Agents, use the explicitly assigned agendas
+        userAgendas = profile.agendas ? profile.agendas.map(a => a.agendas) : [];
+      }
+
       const formattedUser = {
         ...profile,
-        agendas: profile.agendas ? profile.agendas.map(a => a.agendas) : []
+        agendas: userAgendas
       };
 
       setUser(formattedUser);
+
+      // Si el usuario no es superuser y está en la pestaña CRM, lo movemos a Agenda
+      if (formattedUser.role !== 'superuser' && formattedUser.role !== 'owner' && activeTab === 'crm') {
+        setActiveTab("agenda");
+      }
+
       if (formattedUser.agendas?.length > 0) {
         setActiveAgenda(prev => prev || formattedUser.agendas[0]);
       }
@@ -166,11 +215,26 @@ function App() {
   }, []);
 
   const checkPendingConfirmations = async () => {
+    if (!user) return;
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('citas')
         .select('*')
-        .eq('confirmacion', 'Pendiente'); // Ajusta según tu lógica
+        .eq('confirmacion', 'Pendiente');
+
+      if (user.agendas && user.agendas.length > 0) {
+        query = query.in('agenda_id', user.agendas.map(a => a.id));
+      } else {
+        return; // No access to notifications
+      }
+
+      if (user.role !== 'superuser' && user.role !== 'admin' && user.role !== 'owner') {
+        query = query.ilike('vendedor', user.full_name || user.username);
+      }
+
+
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setPendingConfirmations(data.length);
@@ -277,6 +341,7 @@ function App() {
           }
         });
         return {
+          vendedor: user.full_name || user.username,
           ...mappedRow,
           agenda_id: activeAgenda.id
         };
@@ -309,9 +374,18 @@ function App() {
     );
   }, [result, searchTerm]);
 
+  const handleScheduleNext = (cita) => {
+    setPendingReschedule(cita);
+    if (activeTab !== "agenda") setActiveTab("agenda");
+
+    const targetAgenda = user.agendas.find(a => a.id === cita.agenda_id) || activeAgenda || user.agendas[0];
+    setActiveAgenda(targetAgenda);
+  };
+
   if (!user) return <Login onLoginSuccess={(userData) => {
     setUser(userData);
     if (userData.agendas?.length > 0) setActiveAgenda(userData.agendas[0]);
+    if (userData.role !== 'superuser') setActiveTab("agenda");
   }} />;
 
   const AppContent = () => (
@@ -395,13 +469,14 @@ function App() {
     </div>
   );
 
+
   return (
     <div className="container">
       <header className="header">
         <div className="header-top">
           <h1>CRM Organizador</h1>
           <div className="header-controls">
-            {activeTab === "agenda" && <div className="hide-mobile"><SalesCounter /></div>}
+            {activeTab === "agenda" && <div className="hide-mobile"><SalesCounter user={user} /></div>}
 
             <button
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -437,26 +512,51 @@ function App() {
         </div>
 
         <div className="nav-tabs">
-          <div className={`nav-tab ${activeTab === "crm" ? "active" : ""}`} onClick={() => setActiveTab("crm")}>
-            <span className="tab-icon">📊</span> <span className="tab-text">CRM</span>
-          </div>
-          <div className={`nav-tab ${activeTab === "agenda" ? "active" : ""}`} onClick={() => setActiveTab("agenda")}>
-            <span className="tab-icon">📅</span> <span className="tab-text">Agenda</span>
-          </div>
-
-          <div
-            className={`nav-tab ${activeTab === "confirmaciones" ? "active" : ""}`}
-            onClick={() => { setActiveTab("confirmaciones"); setPendingConfirmations(0); }}
-            style={{ position: "relative" }}
-          >
-            <span className="tab-icon">🔔</span> <span className="tab-text">Confirmar</span>
-            {pendingConfirmations > 0 && <span className="bell-badge">{pendingConfirmations}</span>}
-          </div>
-
-          {(user.role === "superuser" || user.role === "admin") && (
-            <div className={`nav-tab ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}>
-              <span className="tab-icon">⚙️</span> <span className="tab-text">Admin</span>
+          {user.role === "owner" && (
+            <div className={`nav-tab ${activeTab === "master" ? "active" : ""}`} onClick={() => setActiveTab("master")}>
+              <span className="tab-icon">👑</span> <span className="tab-text">Maestro</span>
             </div>
+          )}
+          {user.role === "owner" && (
+            <div className={`nav-tab ${activeTab === "planes" ? "active" : ""}`} onClick={() => setActiveTab("planes")}>
+              <span className="tab-icon">💎</span> <span className="tab-text">Suscripciones</span>
+            </div>
+          )}
+
+          {user.role !== "owner" && (
+            <>
+              {user.role === "superuser" && (
+                <div className={`nav-tab ${activeTab === "crm" ? "active" : ""}`} onClick={() => setActiveTab("crm")}>
+                  <span className="tab-icon">📊</span> <span className="tab-text">CRM</span>
+                </div>
+              )}
+              <div className={`nav-tab ${activeTab === "agenda" ? "active" : ""}`} onClick={() => setActiveTab("agenda")}>
+                <span className="tab-icon">📅</span> <span className="tab-text">Agenda</span>
+              </div>
+
+              <div className={`nav-tab ${activeTab === "dashboard" ? "active" : ""}`} onClick={() => setActiveTab("dashboard")}>
+                <span className="tab-icon">📈</span> <span className="tab-text">Mi Dash</span>
+              </div>
+
+              <div
+                className={`nav-tab ${activeTab === "confirmaciones" ? "active" : ""}`}
+                onClick={() => { setActiveTab("confirmaciones"); setPendingConfirmations(0); }}
+                style={{ position: "relative" }}
+              >
+                <span className="tab-icon">🔔</span> <span className="tab-text">Confirmar</span>
+                {pendingConfirmations > 0 && <span className="bell-badge">{pendingConfirmations}</span>}
+              </div>
+
+              <div className={`nav-tab ${activeTab === "seguimientos" ? "active" : ""}`} onClick={() => setActiveTab("seguimientos")}>
+                <span className="tab-icon">🤝</span> <span className="tab-text">Seguimientos</span>
+              </div>
+
+              {(user.role === "superuser" || user.role === "admin") && (
+                <div className={`nav-tab ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}>
+                  <span className="tab-icon">⚙️</span> <span className="tab-text">Admin</span>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -481,53 +581,53 @@ function App() {
       <div style={{ padding: "20px" }}>
         {activeTab === "crm" && <AppContent />}
 
-        {activeTab === "confirmaciones" && <ConfirmationPanel token={localStorage.getItem("token")} />}
+        {activeTab === "confirmaciones" && (
+          <ConfirmationPanel
+            user={user}
+            token={localStorage.getItem("token")}
+            onEditCita={(cita) => {
+              setEditingCita(cita);
+              const [y, m, d] = cita.fecha.split('-').map(Number);
+              setSelectedDate(new Date(y, m - 1, d));
+            }}
+            onRefresh={() => setRefreshCalendar(ref => ref + 1)}
+          />
+        )}
 
-        {activeTab === "admin" && (user.role === "superuser" || user.role === "admin") && (
+        {activeTab === "seguimientos" && <PatientTracking user={user} onScheduleNext={handleScheduleNext} />}
+
+        {activeTab === "master" && user.role === "owner" && <MasterPanel user={user} />}
+        {activeTab === "planes" && user.role === "owner" && <SubscriptionManager user={user} />}
+
+        {activeTab === "admin" && (user.role === "owner" || user.role === "superuser" || user.role === "admin") && (
           <AdminPanel onBack={() => setActiveTab("agenda")} userRole={user.role} />
+        )}
+
+        {activeTab === "dashboard" && (
+          <AgentDashboard user={user} />
         )}
 
         {activeTab === "agenda" && (
           <div className="card">
             {activeAgenda ? (
-              <>
-                <CalendarView
-                  key={`${refreshCalendar}-${activeAgenda.id}`}
-                  onDateSelect={(date) => {
-                    setEditingCita(null);
-                    setSelectedDate(date);
-                  }}
-                  agendaId={activeAgenda.id}
-                  agendas={user.agendas}
-                  token={null}
-                  userRole={user.role}
-                  onEditCita={(cita) => {
-                    setEditingCita(cita);
-                    const [y, m, d] = cita.fecha.split('-').map(Number);
-                    setSelectedDate(new Date(y, m - 1, d));
-                  }}
-                />
-
-                {selectedDate && (
-                  <AgendaForm
-                    selectedDate={selectedDate}
-                    initialData={editingCita}
-                    currentUserName={user.full_name || user.username}
-                    agendaId={activeAgenda.id}
-                    token={null}
-                    userRole={user.role}
-                    onCitaCreated={() => {
-                      setSelectedDate(null);
-                      setEditingCita(null);
-                      setRefreshCalendar(ref => ref + 1);
-                    }}
-                    onCancel={() => {
-                      setSelectedDate(null);
-                      setEditingCita(null);
-                    }}
-                  />
-                )}
-              </>
+              <CalendarView
+                key={`${refreshCalendar}-${activeAgenda.id}`}
+                onDateSelect={(date) => {
+                  setEditingCita(null);
+                  setSelectedDate(date);
+                }}
+                agendaId={activeAgenda.id}
+                agendas={user.agendas}
+                token={null}
+                user={user}
+                userRole={user.role}
+                onEditCita={(cita) => {
+                  setEditingCita(cita);
+                  const [y, m, d] = cita.fecha.split('-').map(Number);
+                  setSelectedDate(new Date(y, m - 1, d));
+                }}
+                onScheduleNext={handleScheduleNext}
+              />
             ) : (
               <div style={{ padding: "40px", textAlign: "center" }}>
                 <p>No tienes agendas asignadas. Contacta al Súper Administrador.</p>
@@ -535,8 +635,52 @@ function App() {
             )}
           </div>
         )}
+
+        {/* Global Modal for New Appointment */}
+        {selectedDate && activeAgenda && (
+          <AgendaForm
+            selectedDate={selectedDate}
+            initialData={editingCita}
+            currentUserName={user.full_name || user.username}
+            agendaId={activeAgenda.id}
+            token={null}
+            userRole={user.role}
+            onCitaCreated={() => {
+              setSelectedDate(null);
+              setEditingCita(null);
+              setRefreshCalendar(ref => ref + 1);
+            }}
+            onCancel={() => {
+              setSelectedDate(null);
+              setEditingCita(null);
+            }}
+          />
+        )}
       </div>
-    </div >
+      {/* Quick Schedule Modal */}
+      {pendingReschedule && activeAgenda && (
+        <QuickScheduleModal
+          baseCita={pendingReschedule}
+          agendaId={activeAgenda.id}
+          onClose={() => setPendingReschedule(null)}
+          onSelectSlot={(selectedDateStr, timeStr) => {
+            const newCita = {
+              ...pendingReschedule,
+              id: null,
+              fecha: selectedDateStr,
+              hora: timeStr,
+              confirmacion: "Pendiente",
+              sesion_nro: (pendingReschedule.sesion_nro || 0) + 1,
+              created_at: null
+            };
+            setEditingCita(newCita);
+            const [y, m, d] = selectedDateStr.split('-').map(Number);
+            setSelectedDate(new Date(y, m - 1, d));
+            setPendingReschedule(null);
+          }}
+        />
+      )}
+    </div>
   );
 }
 

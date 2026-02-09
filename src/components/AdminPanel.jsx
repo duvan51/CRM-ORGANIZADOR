@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
+import ConfirmModal from "./ConfirmModal";
 
 const AdminPanel = ({ token, onBack, userRole }) => {
     console.log("AdminPanel Mount - Role:", userRole);
@@ -11,7 +12,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [horarios, setHorarios] = useState([]);
     const [globalServices, setGlobalServices] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [activeView, setActiveView] = useState((userRole === "superuser" || userRole === "admin") ? "agendas" : "bloqueos");
+    const [activeView, setActiveView] = useState((userRole === "superuser" || userRole === "admin" || userRole === "owner") ? "agendas" : "bloqueos");
     const [selectedAgendaForOffers, setSelectedAgendaForOffers] = useState(null);
     const [agendaOffers, setAgendaOffers] = useState([]);
     const [selectedAgendaForHours, setSelectedAgendaForHours] = useState(null);
@@ -23,7 +24,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [showUserModal, setShowUserModal] = useState(false);
     const [showServiceModal, setShowServiceModal] = useState(null); // stores service object for editing
     const [editingAgenda, setEditingAgenda] = useState({ name: "", description: "", slots_per_hour: 1 });
-    const [editingService, setEditingService] = useState({ nombre: "", precio_base: 0, duracion_minutos: 30, concurrency: 1, color: "#3b82f6", image_url: "", descripcion: "" });
+    const [editingService, setEditingService] = useState({ nombre: "", precio_base: 0, duracion_minutos: 30, concurrency: 1, total_sesiones: 1, color: "#3b82f6", image_url: "", descripcion: "" });
 
     const [newAgenda, setNewAgenda] = useState({ name: "", description: "", slots_per_hour: 1 });
     const [newUser, setNewUser] = useState({
@@ -41,6 +42,17 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [serviceHours, setServiceHours] = useState([]);
     const [editingGeneralHour, setEditingGeneralHour] = useState(null);
     const [editingServiceHour, setEditingServiceHour] = useState(null);
+    const [duplicateHorario, setDuplicateHorario] = useState(null);
+
+    // Confirm Modal State
+    const [confirmModal, setConfirmModal] = useState({
+        isOpen: false,
+        title: "",
+        message: "",
+        icon: "",
+        type: "confirm",
+        onConfirm: () => { }
+    });
 
     useEffect(() => {
         fetchData();
@@ -55,10 +67,32 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const fetchData = async () => {
         setLoading(true);
         try {
+            // 0. Determinar Clinic ID del usuario actual
+            const { data: { user } } = await supabase.auth.getUser();
+            let currentClinicId = null;
+
+            if (user) {
+                // Fetch full profile to get clinic_id
+                const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user.id).single();
+                // If I am superuser, my ID is the clinic_id (or I have it set to self). If I am admin/agent, I use my profile's clinic_id.
+                // However, based on my previous logic: SuperAdmin has clinic_id = self.id.
+                // So checking profile.clinic_id is the safest general way.
+                currentClinicId = profile?.clinic_id;
+            }
+
             // Cargar Agendas con sus usuarios vinculados para detectar asignaciones
-            const { data: agData, error: agError } = await supabase
+            let agendaQuery = supabase
                 .from('agendas')
                 .select('*, users:agenda_users(id:user_id)');
+
+            if (userRole !== 'owner') {
+                // If I am not the owner, I MUST be restricted to my clinic_id.
+                // If my clinic_id is null (legacy), I only see nulls.
+                // If I have a clinic_id, I only see matching agendas.
+                agendaQuery = agendaQuery.eq('clinic_id', currentClinicId);
+            }
+
+            const { data: agData, error: agError } = await agendaQuery;
 
             if (agError) throw agError;
             let agendasList = agData || [];
@@ -79,45 +113,75 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 fetchAgendaOffers(selectedAgendaForOffers);
             }
 
-            // Cargar Usuarios (Profiles) si es superuser o admin
-            if (userRole === "superuser" || userRole === "admin") {
-                const { data: usData, error: usError } = await supabase.from('profiles').select('*, agendas:agenda_users(agenda:agendas(id, name))');
+            // Cargar Usuarios (Profiles) si es superuser, admin u owner
+            if (userRole === "superuser" || userRole === "admin" || userRole === "owner") {
+                let profilesQuery = supabase.from('profiles').select('*, agendas:agenda_users(agenda:agendas(id, name))');
+
+                if (userRole !== 'owner') {
+                    profilesQuery = profilesQuery.eq('clinic_id', currentClinicId);
+                }
+
+                const { data: usData, error: usError } = await profilesQuery;
                 if (usError) throw usError;
                 setUsers(usData || []);
             }
 
-            // Catálogo Maestro
-            const { data: sData, error: sError } = await supabase.from('global_services').select('*');
+            // Catálogo Maestro (Filtrado por Clínica)
+            let servicesQuery = supabase.from('global_services').select('*');
+            if (userRole !== 'owner') {
+                // If I am not owner, strict isolation.
+                // If my clinic_id is null, I only see nulls (legacy/global?)
+                servicesQuery = servicesQuery.eq('clinic_id', currentClinicId);
+            }
+            const { data: sData, error: sError } = await servicesQuery;
+
             if (sError) throw sError;
             setGlobalServices(sData || []);
 
             // Cargar Bloqueos, Alertas, Horarios y Mapeo de Servicios-Agenda
-            const [bRes, aRes, hRes, asRes] = await Promise.all([
-                supabase.from('bloqueos').select('*'),
-                supabase.from('alertas').select('*'),
-                supabase.from('horarios_atencion').select('*'),
-                supabase.from('agenda_services').select('agenda_id, service_id')
-            ]);
+            // SOLO de las agendas cargadas (Aislamiento fuerte)
+            const agendaIds = agendasList.map(a => a.id);
 
-            setBlocks(bRes.data || []);
-            setAlerts(aRes.data || []);
-            setHorarios(hRes.data || []);
-            setAllAgendaServices(asRes.data || []);
+            if (agendaIds.length > 0) {
+                const [bRes, aRes, hRes, asRes] = await Promise.all([
+                    supabase.from('bloqueos').select('*').in('agenda_id', agendaIds),
+                    supabase.from('alertas').select('*').in('agenda_id', agendaIds),
+                    supabase.from('horarios_atencion').select('*').in('agenda_id', agendaIds),
+                    supabase.from('agenda_services').select('agenda_id, service_id').in('agenda_id', agendaIds)
+                ]);
+
+                setBlocks(bRes.data || []);
+                setAlerts(aRes.data || []);
+                setHorarios(hRes.data || []);
+                setAllAgendaServices(asRes.data || []);
+            } else {
+                setBlocks([]);
+                setAlerts([]);
+                setHorarios([]);
+                setAllAgendaServices([]);
+            }
 
         } catch (error) { console.error("Error fetching data:", error); }
         setLoading(false);
     };
 
-    const handleClearDay = async (agendaId, dayIndex) => {
+    const handleClearDay = (agendaId, dayIndex) => {
         if (!agendaId) return alert("Selecciona una agenda");
-        if (!window.confirm("¿Estás seguro de que quieres cerrar todo el día? Se eliminarán todos los rangos horarios.")) return;
 
-        await supabase.from('horarios_atencion')
-            .delete()
-            .eq('agenda_id', agendaId)
-            .eq('dia_semana', dayIndex);
-
-        fetchData();
+        setConfirmModal({
+            isOpen: true,
+            title: "Cerrar Día Completo",
+            message: "¿Estás seguro de que quieres eliminar todos los horarios de este día? La agenda aparecerá como CERRADA.",
+            icon: "🚫",
+            type: "danger",
+            onConfirm: async () => {
+                await supabase.from('horarios_atencion')
+                    .delete()
+                    .eq('agenda_id', agendaId)
+                    .eq('dia_semana', dayIndex);
+                fetchData();
+            }
+        });
     };
 
     const handleUpdateService = async (e) => {
@@ -134,7 +198,16 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
     const handleCreateAgenda = async (e) => {
         e.preventDefault();
-        const { error } = await supabase.from('agendas').insert(newAgenda);
+
+        // Get clinic_id
+        const { data: { user } } = await supabase.auth.getUser();
+        const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user.id).single();
+        const currentClinicId = profile?.clinic_id;
+
+        const { error } = await supabase.from('agendas').insert({
+            ...newAgenda,
+            clinic_id: currentClinicId
+        });
         if (!error) {
             setNewAgenda({ name: "", description: "", slots_per_hour: 1 });
             setShowEditAgenda(null);
@@ -142,10 +215,18 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
     };
 
-    const handleDeleteAgenda = async (id) => {
-        if (!confirm("¿Estás seguro de eliminar esta agenda y todas sus citas?")) return;
-        const { error } = await supabase.from('agendas').delete().eq('id', id);
-        if (!error) fetchData();
+    const handleDeleteAgenda = (id) => {
+        setConfirmModal({
+            isOpen: true,
+            title: "Eliminar Agenda",
+            message: "¿Estás seguro de eliminar esta agenda y todas sus citas asociadas? Esta acción es irreversible.",
+            icon: "📂",
+            type: "danger",
+            onConfirm: async () => {
+                const { error } = await supabase.from('agendas').delete().eq('id', id);
+                if (!error) fetchData();
+            }
+        });
     };
 
     const handleUpdateAgenda = async (e) => {
@@ -169,10 +250,18 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         fetchData();
     };
 
-    const handleDeleteUser = async (id) => {
-        if (!confirm("¿Eliminar este usuario? En Supabase esto desvinculará su perfil.")) return;
-        const { error } = await supabase.from('profiles').delete().eq('id', id);
-        if (!error) fetchData();
+    const handleDeleteUser = (id) => {
+        setConfirmModal({
+            isOpen: true,
+            title: "Eliminar Usuario",
+            message: "¿Deseas eliminar permanentemente a este usuario? Perderá el acceso al sistema de inmediato.",
+            icon: "👤",
+            type: "danger",
+            onConfirm: async () => {
+                const { error } = await supabase.from('users').delete().eq('id', id);
+                if (!error) fetchData();
+            }
+        });
     };
 
     const handleCreateCreateBlock = async (e) => {
@@ -190,10 +279,18 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
     };
 
-    const handleDeleteBlock = async (id) => {
-        if (!confirm("¿Eliminar bloqueo?")) return;
-        const { error } = await supabase.from('bloqueos').delete().eq('id', id);
-        if (!error) fetchData();
+    const handleDeleteBlock = (id) => {
+        setConfirmModal({
+            isOpen: true,
+            title: "Eliminar Bloqueo",
+            message: "¿Deseas liberar este horario y eliminar el bloqueo?",
+            icon: "🔓",
+            type: "confirm",
+            onConfirm: async () => {
+                const { error } = await supabase.from('bloqueos').delete().eq('id', id);
+                if (!error) fetchData();
+            }
+        });
     };
 
     const handleCreateAlert = async (e) => {
@@ -243,13 +340,18 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             if (authError) throw authError;
 
             // 3. Crear perfil en la tabla 'profiles' usando el cliente principal (Superadmin)
+            // Obtener mi clinic_id para heredarlo
+            const { data: { user: currentUser } } = await supabase.auth.getUser();
+            const { data: currentProfile } = await supabase.from('profiles').select('clinic_id').eq('id', currentUser.id).single();
+
             const { error: profileError } = await supabase
                 .from('profiles')
                 .upsert({
                     id: authData.user.id,
                     username: newUser.username,
                     full_name: newUser.full_name,
-                    role: newUser.role
+                    role: newUser.role,
+                    clinic_id: currentProfile?.clinic_id // Inherit Clinic ID
                 });
 
             if (profileError) {
@@ -289,14 +391,21 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         setLoading(true);
         try {
             const isNew = showServiceModal.id === 'new';
+            // Get clinic_id for new service
+            const { data: { user } } = await supabase.auth.getUser();
+            const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user.id).single();
+            const currentClinicId = profile?.clinic_id;
+
             const payload = {
                 nombre: editingService.nombre,
                 descripcion: editingService.descripcion,
                 precio_base: parseFloat(editingService.precio_base),
                 duracion_minutos: parseInt(editingService.duracion_minutos),
                 concurrency: parseInt(editingService.concurrency),
+                total_sesiones: parseInt(editingService.total_sesiones || 1),
                 color: editingService.color,
-                image_url: editingService.image_url
+                image_url: editingService.image_url,
+                clinic_id: currentClinicId // Assign to current clinic
             };
 
             let serviceId = showServiceModal.id;
@@ -433,9 +542,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 <tr key={u.id}>
                                     <td><strong>{u.full_name}</strong></td>
                                     <td>@{u.username}</td>
-                                    <td><span className={`role-badge ${u.role}`}>{u.role}</span></td>
+                                    <td>
+                                        <span className={`role-badge ${u.role}`}>
+                                            {u.role === 'superuser' ? 'SuperAdmin' : u.role === 'admin' ? 'Administrador' : 'Agente'}
+                                        </span>
+                                    </td>
                                     <td>{u.agendas?.map(ua => ua.agenda.name).join(", ") || "Sin acceso"}</td>
-                                    {userRole === "superuser" && (
+                                    {(userRole === "superuser" || userRole === "owner") && (
                                         <td>
                                             <button className="btn-delete" style={{ padding: '6px 12px' }} onClick={() => handleDeleteUser(u.id)}>🗑️</button>
                                         </td>
@@ -637,6 +750,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                                 <span>{h.hora_inicio}-{h.hora_fin}</span>
                                                 <small>{agendas.find(a => a.id === h.agenda_id)?.name}</small>
                                                 <div className="mini-item-actions">
+                                                    <button className="btn-edit-tiny" onClick={() => setDuplicateHorario(h)} title="Duplicar a otro día">📑</button>
                                                     <button className="btn-edit-tiny" onClick={() => setEditingGeneralHour(h)}>✏️</button>
                                                     <button className="btn-delete-tiny" onClick={async () => {
                                                         await supabase.from('horarios_atencion').delete().eq('id', h.id);
@@ -687,8 +801,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     .filter(gs => {
                                         // No mostrar si ya está en esta agenda
                                         if (agendaOffers.some(ao => ao.service_id === gs.id)) return false;
-                                        // Superadmin ve todo el resto
-                                        if (userRole === "superuser") return true;
+                                        // Superadmin/Owner ve todo el resto
+                                        if ((userRole === "superuser" || userRole === "owner")) return true;
                                         // Admin ve solo si está en alguna de sus agendas
                                         return allAgendaServices.some(as => as.service_id === gs.id && agendas.some(ag => ag.id === as.agenda_id));
                                     })
@@ -751,13 +865,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             <div className="master-catalog-section">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                     <h4 style={{ margin: 0 }}>🌟 Catálogo Maestro (Global)</h4>
-                    {userRole === "superuser" && <button className="btn-process" onClick={() => setShowServiceModal({ id: 'new' })}>+ Nuevo Servicio</button>}
+                    {(userRole === "superuser" || userRole === "owner") && <button className="btn-process" onClick={() => setShowServiceModal({ id: 'new' })}>+ Nuevo Servicio</button>}
                 </div>
 
                 <div className="service-premium-grid">
                     {globalServices
                         .filter(s => {
-                            if (userRole === "superuser") return true;
+                            if ((userRole === "superuser" || userRole === "owner")) return true;
                             // Para admin, mostrar solo si el servicio está en alguna de sus agendas
                             return allAgendaServices.some(as => as.service_id === s.id && agendas.some(ag => ag.id === as.agenda_id));
                         })
@@ -776,7 +890,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         <span>⏱️ {s.duracion_minutos} min</span>
                                         <span>👥 {s.concurrency > 1 ? `${s.concurrency} cupos` : '1 cupo'}</span>
                                     </div>
-                                    {userRole === "superuser" && (
+                                    {(userRole === "superuser" || userRole === "owner") && (
                                         <div className="service-actions">
                                             <button className="btn-edit-v2" onClick={() => {
                                                 setEditingService({
@@ -790,11 +904,18 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                                 });
                                                 setShowServiceModal(s);
                                             }}>✏️ Editar</button>
-                                            <button className="btn-delete-v2" onClick={async () => {
-                                                if (confirm("¿Eliminar este servicio del catálogo maestro? Esto lo quitará de todas las agendas.")) {
-                                                    const { error } = await supabase.from('global_services').delete().eq('id', s.id);
-                                                    if (!error) fetchData();
-                                                }
+                                            <button className="btn-delete-v2" onClick={() => {
+                                                setConfirmModal({
+                                                    isOpen: true,
+                                                    title: "Eliminar del Catálogo",
+                                                    message: "¿Estás seguro de eliminar este servicio del catálogo maestro? Se desvinculará de TODAS las agendas.",
+                                                    icon: "📦",
+                                                    type: "danger",
+                                                    onConfirm: async () => {
+                                                        const { error } = await supabase.from('global_services').delete().eq('id', s.id);
+                                                        if (!error) fetchData();
+                                                    }
+                                                });
                                             }}>🗑️</button>
                                         </div>
                                     )}
@@ -818,7 +939,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     <button className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}>👥 Personal</button>
                     <button className={activeView === "bloqueos" ? "active" : ""} onClick={() => setActiveView("bloqueos")}>🚫 Bloqueos</button>
                     <button className={activeView === "alertas" ? "active" : ""} onClick={() => setActiveView("alertas")}>🔔 Alertas</button>
-                    {(userRole === "superuser" || userRole === "admin") && (
+                    {(userRole === "superuser" || userRole === "admin" || userRole === "owner") && (
                         <>
                             <button className={activeView === "servicios" ? "active" : ""} onClick={() => setActiveView("servicios")}>🛒 Servicios</button>
                             <button className={activeView === "horarios" ? "active" : ""} onClick={() => setActiveView("horarios")}>🕒 Horarios</button>
@@ -897,7 +1018,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <h3>Gestionar Agentes: {showAgentModal.name}</h3>
                         <p>Selecciona los agentes que tienen permiso para ver esta agenda.</p>
                         <div className="agent-list-scroll">
-                            {users.filter(u => u.role !== 'superuser').map(u => {
+                            {users.filter(u => u.role !== 'superuser' && u.role !== 'owner').map(u => {
                                 const isAssigned = agendas.find(a => a.id === showAgentModal.id)?.users?.some(au => au.id === u.id);
                                 return (
                                     <div key={u.id} className="agent-item-row">
@@ -992,11 +1113,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             </div>
                             <div className="form-group">
                                 <label>Rol del Usuario</label>
-                                {userRole === 'superuser' ? (
+                                {(userRole === 'superuser' || userRole === 'owner') ? (
                                     <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })} className="custom-file-input">
-                                        <option value="agent">Agente</option>
-                                        <option value="admin">Administrador</option>
-                                        <option value="superuser">Super Admin</option>
+                                        <option value="agent">Agente / Vendedor</option>
+                                        <option value="admin">Administrador (Sede)</option>
+                                        {(userRole === 'owner' || userRole === 'superuser') && <option value="superuser">SuperAdmin (Clínica)</option>}
                                     </select>
                                 ) : (
                                     <div className="role-badge agent" style={{ padding: '10px', display: 'block', textAlign: 'center' }}>
@@ -1015,10 +1136,64 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 </div>
             )}
 
+            {/* MODAL: DUPLICATE SCHEDULE */}
+            {duplicateHorario && (
+                <div className="modal-overlay">
+                    <div className="modal-content premium-modal" style={{ maxWidth: '450px' }}>
+                        <h3>Duplicar Horario</h3>
+                        <p style={{ marginBottom: '15px' }}>
+                            Copiando rango <strong>{duplicateHorario.hora_inicio} - {duplicateHorario.hora_fin}</strong>
+                            <br />
+                            <small className="text-muted">De la agenda: {agendas.find(a => a.id === duplicateHorario.agenda_id)?.name}</small>
+                        </p>
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            setLoading(true);
+                            if (!e.target.target_day.value) return;
+
+                            const targetDay = parseInt(e.target.target_day.value);
+
+                            const { error } = await supabase.from('horarios_atencion').insert({
+                                agenda_id: duplicateHorario.agenda_id,
+                                dia_semana: targetDay,
+                                hora_inicio: duplicateHorario.hora_inicio,
+                                hora_fin: duplicateHorario.hora_fin
+                            });
+
+                            if (!error) {
+                                setDuplicateHorario(null);
+                                fetchData();
+                            } else {
+                                alert("Error al duplicar: " + error.message);
+                            }
+                            setLoading(false);
+                        }}>
+                            <div className="form-group" style={{ marginBottom: '20px' }}>
+                                <label>Selecciona el Día Destino</label>
+                                <select name="target_day" required className="custom-file-input">
+                                    <option value="">-- Seleccionar Día --</option>
+                                    {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((d, i) => (
+                                        <option key={i} value={i} disabled={i === duplicateHorario.dia_semana}>
+                                            {d} {i === duplicateHorario.dia_semana ? '(Origen)' : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn-secondary" onClick={() => setDuplicateHorario(null)}>Cancelar</button>
+                                <button type="submit" className="btn-process" disabled={loading}>
+                                    {loading ? "Copiando..." : "Duplicar Ahora"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
             {/* MODAL: EDIT/NEW GLOBAL SERVICE */}
             {showServiceModal && (
                 <div className="modal-overlay">
-                    <div className="modal-content premium-modal">
+                    <div className="modal-content premium-modal full-screen-modal">
                         <h3>{showServiceModal.id === 'new' ? 'Nuevo Servicio Global' : `Editar: ${showServiceModal.nombre}`}</h3>
                         <form onSubmit={handleSaveService} className="premium-form">
                             <div className="form-group">
@@ -1040,8 +1215,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     rows="3"
                                 />
                             </div>
-                            <div className="form-row-three">
-                                <div className="form-group">
+                            <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                                <div className="form-group" style={{ flex: 1 }}>
                                     <label>Precio Base $</label>
                                     <input
                                         type="number"
@@ -1050,7 +1225,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         required
                                     />
                                 </div>
-                                <div className="form-group">
+                                <div className="form-group" style={{ flex: 1 }}>
                                     <label>Duración (min)</label>
                                     <input
                                         type="number"
@@ -1059,14 +1234,27 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         required
                                     />
                                 </div>
-                                <div className="form-group">
-                                    <label>Cupos Simult.</label>
+                            </div>
+                            <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label>Cupos Simultáneos</label>
                                     <input
                                         type="number"
                                         value={editingService.concurrency}
                                         onChange={e => setEditingService({ ...editingService, concurrency: e.target.value })}
                                         required
                                         min="1"
+                                    />
+                                </div>
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label>Total Sesiones (Paquete)</label>
+                                    <input
+                                        type="number"
+                                        value={editingService.total_sesiones}
+                                        onChange={e => setEditingService({ ...editingService, total_sesiones: e.target.value })}
+                                        required
+                                        min="1"
+                                        placeholder="1 para cita única"
                                     />
                                 </div>
                             </div>
@@ -1117,6 +1305,16 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     </div>
                 </div>
             )}
+
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                onConfirm={confirmModal.onConfirm}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                icon={confirmModal.icon}
+                type={confirmModal.type}
+            />
         </div>
     );
 };
