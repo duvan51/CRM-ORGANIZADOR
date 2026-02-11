@@ -1405,6 +1405,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     </div>
                 </div>
             </div>
+        );
     };
 
     const handleUpdateMyPassword = async (e) => {

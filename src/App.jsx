@@ -15,6 +15,7 @@ import PatientTracking from "./components/PatientTracking.jsx";
 import SubscriptionManager from "./components/SubscriptionManager.jsx";
 import QuickScheduleModal from "./components/QuickScheduleModal.jsx";
 import ResetPasswordForm from "./components/ResetPasswordForm.jsx";
+import MasterPanel from "./components/MasterPanel.jsx";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div className="field-manager-container">
     <h4 className="field-manager-title">Columnas a unificar:</h4>
@@ -131,8 +132,7 @@ function App() {
         }
         break;
       case "REFRESH_USERS":
-        const token = localStorage.getItem("token");
-        if (token) fetchUserProfile(token);
+        fetchUserProfile();
         break;
       case "REFRESH_AGENDAS":
         // Recargar agendas si cambian
@@ -604,7 +604,6 @@ function App() {
         {activeTab === "confirmaciones" && (
           <ConfirmationPanel
             user={user}
-            token={localStorage.getItem("token")}
             onEditCita={(cita) => {
               setEditingCita(cita);
               const [y, m, d] = cita.fecha.split('-').map(Number);

@@ -26,6 +26,9 @@ const MasterPanel = ({ user }) => {
     const [newPassword, setNewPassword] = useState("");
     const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
+    const [myPasswordData, setMyPasswordData] = useState({ newPassword: "", confirmPassword: "" });
+    const [updatingMyOwnPassword, setUpdatingMyOwnPassword] = useState(false);
+
     const handleCreateSuperAdmin = async (e) => {
         e.preventDefault();
         setLoading(true);
@@ -106,10 +109,14 @@ const MasterPanel = ({ user }) => {
         setIsUpdatingPassword(true);
         try {
             // Invocamos una Edge Function personalizada para cambiar la contraseña usando el Admin SDK
+            const { data: { session } } = await supabase.auth.getSession();
             const { data, error } = await supabase.functions.invoke('admin-update-user', {
                 body: {
                     userId: editingSuperAdmin.id,
                     password: newPassword
+                },
+                headers: {
+                    Authorization: `Bearer ${session?.access_token}`
                 }
             });
 
@@ -122,6 +129,60 @@ const MasterPanel = ({ user }) => {
             showNotify("Error: Revisa que la Edge Function 'admin-update-user' esté activa", "error");
         } finally {
             setIsUpdatingPassword(false);
+        }
+    };
+
+    const handleUpdateMyOwnPassword = async (e) => {
+        e.preventDefault();
+        if (myPasswordData.newPassword !== myPasswordData.confirmPassword) {
+            return showNotify("Las contraseñas no coinciden", "error");
+        }
+        if (myPasswordData.newPassword.length < 6) {
+            return showNotify("La contraseña debe tener al menos 6 caracteres", "error");
+        }
+
+        setUpdatingMyOwnPassword(true);
+        try {
+            // 1. Obtener y verificar sesión
+            const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+            if (sessionError || !session) {
+                console.error("Sesión no recuperable:", sessionError);
+                throw new Error("Sesión perdida. Por favor reingresa al sistema.");
+            }
+
+            // 2. Intentar actualizar vía standard auth
+            const { error: updateError } = await supabase.auth.updateUser({
+                password: myPasswordData.newPassword
+            });
+
+            if (updateError) {
+                console.warn("Error con updateUser (403/Forbidden?), intentando vía Edge Function...");
+
+                // 3. Fallback: Usar la Edge Function pasando el token manualmente para evitar 401
+                const { data: funcData, error: funcError } = await supabase.functions.invoke('admin-update-user', {
+                    body: {
+                        userId: user.id, // ID del superadmin actual
+                        password: myPasswordData.newPassword
+                    },
+                    headers: {
+                        Authorization: `Bearer ${session.access_token}`
+                    }
+                });
+
+                if (funcError) {
+                    console.error("Error en Edge Function Fallback:", funcError);
+                    throw new Error("No se pudo actualizar la contraseña. Contacta a soporte.");
+                }
+            }
+
+            showNotify("✅ Contraseña actualizada correctamente.");
+            setMyPasswordData({ newPassword: "", confirmPassword: "" });
+        } catch (err) {
+            console.error("Error crítico en actualización de clave:", err);
+            showNotify("Error: " + (err.message || "No se pudo actualizar"), "error");
+        } finally {
+            setUpdatingMyOwnPassword(false);
         }
     };
 
@@ -262,16 +323,48 @@ const MasterPanel = ({ user }) => {
             </div>
 
             <div className="card" style={{ marginTop: '25px', padding: '25px' }}>
-                <h3>Configuración Global del Sistema</h3>
-                <p style={{ color: 'var(--text-muted)' }}>Configura aquí los parámetros base del CRM, precios de suscripción y notificaciones generales.</p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '15px' }}>
-                    <div className="filter-group">
-                        <label>Precio Suscripción Base ($)</label>
-                        <input type="number" defaultValue="150000" />
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '40px' }}>
+                    <div>
+                        <h3>⚙️ Configuración Global</h3>
+                        <p style={{ color: 'var(--text-muted)' }}>Parámetros base del CRM y precios de suscripción.</p>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '15px' }}>
+                            <div className="filter-group">
+                                <label>Precio Suscripción Base ($)</label>
+                                <input type="number" defaultValue="150000" />
+                            </div>
+                            <div className="filter-group">
+                                <label>Límite de Agendas por Clínica</label>
+                                <input type="number" defaultValue="5" />
+                            </div>
+                        </div>
                     </div>
-                    <div className="filter-group">
-                        <label>Límite de Agendas por Clínica</label>
-                        <input type="number" defaultValue="5" />
+
+                    <div style={{ borderLeft: '1px solid var(--glass-border)', paddingLeft: '40px' }}>
+                        <h3>🔑 Seguridad de mi Cuenta</h3>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Cambia tu clave de acceso root.</p>
+                        <form onSubmit={handleUpdateMyOwnPassword} className="premium-form-v" style={{ marginTop: '15px' }}>
+                            <div className="form-group">
+                                <input
+                                    type="password"
+                                    placeholder="Nueva contraseña"
+                                    required
+                                    value={myPasswordData.newPassword}
+                                    onChange={e => setMyPasswordData({ ...myPasswordData, newPassword: e.target.value })}
+                                />
+                            </div>
+                            <div className="form-group" style={{ marginTop: '10px' }}>
+                                <input
+                                    type="password"
+                                    placeholder="Confirmar contraseña"
+                                    required
+                                    value={myPasswordData.confirmPassword}
+                                    onChange={e => setMyPasswordData({ ...myPasswordData, confirmPassword: e.target.value })}
+                                />
+                            </div>
+                            <button type="submit" className="btn-process" disabled={updatingMyOwnPassword} style={{ marginTop: '15px', width: '100%' }}>
+                                {updatingMyOwnPassword ? 'Actualizando...' : '💾 Actualizar mi clave'}
+                            </button>
+                        </form>
                     </div>
                 </div>
             </div>
