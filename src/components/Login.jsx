@@ -53,6 +53,23 @@ const Login = ({ onLoginSuccess }) => {
         }
     };
 
+    const handleGoogleLogin = async () => {
+        try {
+            setLoading(true);
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider: 'google',
+                options: {
+                    redirectTo: window.location.origin
+                }
+            });
+            if (error) throw error;
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     return (
         <div className="login-container">
             <div className="login-card">
@@ -93,6 +110,20 @@ const Login = ({ onLoginSuccess }) => {
                         disabled={loading}
                     >
                         {loading ? <div className="spinner" /> : "Iniciar Sesión"}
+                    </button>
+
+                    <div className="login-divider">
+                        <span>O continuar con</span>
+                    </div>
+
+                    <button
+                        type="button"
+                        className="btn-social google"
+                        onClick={handleGoogleLogin}
+                        disabled={loading}
+                    >
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" width="18" height="18" />
+                        Google
                     </button>
                 </form>
 

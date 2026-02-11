@@ -212,6 +212,18 @@ function App() {
   useEffect(() => {
     fetchUserProfile();
     checkPendingConfirmations();
+
+    // Listen for auth state changes (Social Login / Logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("Auth Event:", event);
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        fetchUserProfile();
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const checkPendingConfirmations = async () => {

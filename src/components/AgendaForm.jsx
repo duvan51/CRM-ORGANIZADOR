@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../supabase";
 
-const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, userRole, initialData = null, currentUserName = "" }) => {
+export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agendaId, token, userRole, initialData = null, currentUserName = "" }) {
 
 
     const [loading, setLoading] = useState(false);
@@ -365,6 +365,105 @@ const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, us
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
+    const triggerSMS = async (eventType, citaData) => {
+        try {
+            // 1. Obtener la clínica a la que pertenece esta agenda
+            const { data: agenda } = await supabase.from('agendas').select('clinic_id').eq('id', agendaId).single();
+            if (!agenda?.clinic_id) return;
+
+            // 1.5 Verificar si el SMS está activo globalmente para la clínica
+            const { data: config } = await supabase
+                .from('infobip_configs')
+                .select('is_active')
+                .eq('clinic_id', agenda.clinic_id)
+                .maybeSingle();
+
+            if (!config || !config.is_active) return;
+
+            // 2. Buscar plantilla activa para este evento
+            const { data: template } = await supabase
+                .from('sms_templates')
+                .select('*')
+                .eq('clinic_id', agenda.clinic_id)
+                .eq('event_type', eventType)
+                .eq('is_active', true)
+                .maybeSingle();
+
+            if (!template || !citaData.celular) return;
+
+            // 3. Reemplazar variables {paciente}, {fecha}, {hora}
+            let message = template.content
+                .replace(/{paciente}/g, citaData.nombres_completos)
+                .replace(/{fecha}/g, citaData.fecha)
+                .replace(/{hora}/g, citaData.hora);
+
+            // 4. Invocar Edge Function de envío
+            const { data, error } = await supabase.functions.invoke('send-sms-infobip', {
+                body: {
+                    clinicId: agenda.clinic_id,
+                    phone: citaData.celular,
+                    message: message,
+                    patientName: citaData.nombres_completos
+                }
+            });
+            if (error) throw error;
+            console.log("SMS Sent Successfully:", data);
+        } catch (e) {
+            console.error("Error triggering SMS:", e);
+        }
+    };
+
+    const triggerEmail = async (eventType, citaData) => {
+        if (!citaData.email) return;
+        try {
+            const { data: agenda } = await supabase.from('agendas').select('clinic_id').eq('id', agendaId).single();
+            if (!agenda?.clinic_id) return;
+
+            // 1.5 Verificar si el Email está activo globalmente para la clínica
+            const { data: config } = await supabase
+                .from('email_configs')
+                .select('is_active')
+                .eq('clinic_id', agenda.clinic_id)
+                .maybeSingle();
+
+            if (!config || !config.is_active) return;
+
+            const { data: template } = await supabase
+                .from('email_templates')
+                .select('*')
+                .eq('clinic_id', agenda.clinic_id)
+                .eq('event_type', eventType)
+                .eq('is_active', true)
+                .maybeSingle();
+
+            if (!template) return;
+
+            let subject = template.subject
+                .replace(/{paciente}/g, citaData.nombres_completos)
+                .replace(/{fecha}/g, citaData.fecha)
+                .replace(/{hora}/g, citaData.hora);
+
+            let message = template.content
+                .replace(/{paciente}/g, citaData.nombres_completos)
+                .replace(/{fecha}/g, citaData.fecha)
+                .replace(/{hora}/g, citaData.hora);
+
+            const { data, error } = await supabase.functions.invoke('send-email-hostinger', {
+                body: {
+                    clinicId: agenda.clinic_id,
+                    to: citaData.email,
+                    subject: subject,
+                    body: message,
+                    patientName: citaData.nombres_completos
+                }
+            });
+            if (error) throw error;
+            console.log("Email Sent Successfully:", data);
+        } catch (e) {
+            console.error("Error triggering Email:", e);
+        }
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
 
@@ -377,13 +476,9 @@ const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, us
             }
         }
 
-        // --- VALIDACIÓN DE HORARIO Y CUPOS ANTES DE GUARDAR ---
         const s = configServicios.find(as => as.service.nombre === formData.tipo_servicio);
         const isValid = validateTime(formData.hora, s ? s.service.duracion_minutos : 30);
-        if (!isValid) {
-            // El error ya se setea en validateTime
-            return;
-        }
+        if (!isValid) return;
 
         setLoading(true);
         try {
@@ -393,14 +488,18 @@ const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, us
                     .update(formData)
                     .eq('id', initialData.id);
                 if (error) throw error;
+                triggerSMS('booking_confirmation', { ...formData, id: initialData.id });
+                triggerEmail('booking_confirmation', { ...formData, id: initialData.id });
             } else {
-                const insertData = { ...formData };
-                delete insertData.id;
-                delete insertData.created_at;
-                const { error } = await supabase
+                const { data, error } = await supabase
                     .from('citas')
-                    .insert(insertData);
+                    .insert([{ ...formData, agenda_id: agendaId }])
+                    .select()
+                    .single();
+
                 if (error) throw error;
+                triggerSMS('booking_confirmation', data);
+                triggerEmail('booking_confirmation', data);
             }
             onCitaCreated();
         } catch (error) {
@@ -608,6 +707,6 @@ const AgendaForm = ({ selectedDate, onCitaCreated, onCancel, agendaId, token, us
             </div >
         </div >
     );
-};
+}
 
-export default AgendaForm;
+

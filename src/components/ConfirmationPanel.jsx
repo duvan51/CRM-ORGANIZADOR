@@ -173,6 +173,115 @@ const ConfirmationPanel = ({ user, onEditCita, onRefresh }) => {
         });
     };
 
+    const handleManualSMS = async (paciente, celular, fecha, hora, eventType = 'immediate_attention') => {
+        try {
+            // Find clinicId (usually user.clinic_id if superuser, or from agenda link)
+            // For simplicity, let's try to get it from the user profile if possible
+            const clinicId = user.clinic_id || user.id;
+
+            // 0. Verify if SMS is active
+            const { data: config } = await supabase
+                .from('infobip_configs')
+                .select('is_active')
+                .eq('clinic_id', clinicId)
+                .maybeSingle();
+
+            if (!config || !config.is_active) {
+                alert("El servicio de SMS está desactivado en la configuración.");
+                return;
+            }
+
+            // Fetch template
+            const { data: template } = await supabase
+                .from('sms_templates')
+                .select('*')
+                .eq('clinic_id', clinicId)
+                .eq('event_type', eventType)
+                .single();
+
+            if (!template) {
+                alert("No hay plantilla configurada para este evento.");
+                return;
+            }
+
+            let message = template.content
+                .replace(/{paciente}/g, paciente)
+                .replace(/{fecha}/g, fecha)
+                .replace(/{hora}/g, hora);
+
+            const { data, error } = await supabase.functions.invoke('send-sms-infobip', {
+                body: { clinicId, phone: celular, message, patientName: paciente }
+            });
+
+            if (error) throw error;
+            alert("SMS enviado con éxito vía Infobip.");
+        } catch (e) {
+            console.error(e);
+            alert("Error al enviar SMS: " + e.message);
+        }
+    };
+
+    const handleManualEmail = async (paciente, email, fecha, hora, eventType = 'immediate_attention') => {
+        if (!email) {
+            alert("Este paciente no tiene correo registrado.");
+            return;
+        }
+        try {
+            const clinicId = user.clinic_id || user.id;
+
+            // 0. Verify if Email is active
+            const { data: config } = await supabase
+                .from('email_configs')
+                .select('is_active')
+                .eq('clinic_id', clinicId)
+                .maybeSingle();
+
+            if (!config || !config.is_active) {
+                alert("El servicio de Email está desactivado en la configuración.");
+                return;
+            }
+
+            const { data: template } = await supabase
+                .from('email_templates')
+                .select('*')
+                .eq('clinic_id', clinicId)
+                .eq('event_type', eventType)
+                .eq('is_active', true)
+                .single();
+
+            if (!template) {
+                alert("No hay plantilla de email configurada para este evento.");
+                return;
+            }
+
+            let subject = template.subject
+                .replace(/{paciente}/g, paciente)
+                .replace(/{fecha}/g, fecha)
+                .replace(/{hora}/g, hora);
+
+            let message = template.content
+                .replace(/{paciente}/g, paciente)
+                .replace(/{fecha}/g, fecha)
+                .replace(/{hora}/g, hora);
+
+            const { data, error } = await supabase.functions.invoke('send-email-hostinger', {
+                body: {
+                    clinicId,
+                    to: email,
+                    subject: subject,
+                    body: message,
+                    patientName: paciente
+                }
+            });
+
+            if (error) throw error;
+            alert("Email enviado con éxito vía Hostinger SMTP.");
+        } catch (e) {
+            console.error(e);
+            alert("Error al enviar Email: " + e.message);
+        }
+    };
+
     const handleWhatsApp = (celular, nombre, fecha, hora) => {
         const msg = `Hola ${nombre}, te recordamos tu sesión para el ${fecha} a las ${hora}. Por favor confirma tu asistencia.`;
         window.open(`https://wa.me/57${celular}?text=${encodeURIComponent(msg)}`, "_blank");
@@ -237,6 +346,8 @@ const ConfirmationPanel = ({ user, onEditCita, onRefresh }) => {
                                 {!isConfirmed && !isCancelled && (
                                     <>
                                         <button className="btn-icon-mini" onClick={() => handleWhatsApp(s.celular, s.nombres_completos, s.fecha, s.hora)} title="WhatsApp">💬</button>
+                                        <button className="btn-icon-mini" onClick={() => handleManualSMS(s.nombres_completos, s.celular, s.fecha, s.hora)} title="Enviar SMS Infobip">📲</button>
+                                        <button className="btn-icon-mini" onClick={() => handleManualEmail(s.nombres_completos, s.email, s.fecha, s.hora)} title="Enviar Email Hostinger">📧</button>
                                         <button className="btn-icon-mini" onClick={() => onEditCita(s)} title="Editar/Aplazar">✏️</button>
                                         <button className="btn-icon-mini" onClick={() => handleConfirm(s.id)} title="Confirmar" style={{ color: 'var(--success)' }}>✅</button>
                                         <button className="btn-icon-mini" onClick={() => handleCancel(s.id)} title="Eliminar" style={{ color: 'var(--danger)' }}>🗑️</button>

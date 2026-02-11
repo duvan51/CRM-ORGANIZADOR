@@ -21,6 +21,10 @@ const MasterPanel = ({ user }) => {
         password: "",
         subscription_plan_id: ""
     });
+    const [viewingClinic, setViewingClinic] = useState(null);
+    const [notification, setNotification] = useState(null); // { message, type }
+    const [newPassword, setNewPassword] = useState("");
+    const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
     const handleCreateSuperAdmin = async (e) => {
         e.preventDefault();
@@ -53,14 +57,14 @@ const MasterPanel = ({ user }) => {
 
                 if (profileError) throw profileError;
 
-                alert("SuperAdmin creado exitosamente.");
+                showNotify("SuperAdmin creado exitosamente.");
                 setShowCreateModal(false);
                 setNewSuperAdmin({ name: "", clinic_name: "", email: "", password: "", subscription_plan_id: "" });
                 fetchData();
             }
         } catch (error) {
             console.error("Error creating SuperAdmin:", error);
-            alert("Error: " + error.message);
+            showNotify("Error: " + error.message, 'error');
         } finally {
             setLoading(false);
         }
@@ -82,14 +86,42 @@ const MasterPanel = ({ user }) => {
 
             if (error) throw error;
 
-            alert("SuperAdmin actualizado correctamente.");
+            showNotify("SuperAdmin actualizado correctamente.");
             setEditingSuperAdmin(null);
             fetchData();
         } catch (error) {
             console.error("Error updating SuperAdmin:", error);
-            alert("Error al actualizar: " + error.message);
+            showNotify("Error al actualizar: " + error.message, 'error');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleUpdatePassword = async () => {
+        if (!newPassword || newPassword.length < 6) {
+            showNotify("La contraseña debe tener al menos 6 caracteres", "error");
+            return;
+        }
+
+        setIsUpdatingPassword(true);
+        try {
+            // Invocamos una Edge Function personalizada para cambiar la contraseña usando el Admin SDK
+            const { data, error } = await supabase.functions.invoke('admin-update-user', {
+                body: {
+                    userId: editingSuperAdmin.id,
+                    password: newPassword
+                }
+            });
+
+            if (error) throw error;
+
+            showNotify("¡Contraseña actualizada con éxito!");
+            setNewPassword("");
+        } catch (error) {
+            console.error("Error updating password:", error);
+            showNotify("Error: Revisa que la Edge Function 'admin-update-user' esté activa", "error");
+        } finally {
+            setIsUpdatingPassword(false);
         }
     };
 
@@ -132,6 +164,11 @@ const MasterPanel = ({ user }) => {
     useEffect(() => {
         fetchData();
     }, []);
+
+    const showNotify = (msg, type = 'success') => {
+        setNotification({ message: msg, type });
+        setTimeout(() => setNotification(null), 4000);
+    };
 
     if (loading) return <div className="loading-spinner">Cargando Panel Maestro...</div>;
 
@@ -204,7 +241,7 @@ const MasterPanel = ({ user }) => {
                                             <button
                                                 className="btn-pro-icon edit"
                                                 title="Ver Detalles"
-                                                onClick={() => alert(`Detalles de ${user.clinic_name}:\nUsuario: ${user.username}\nPlan: ${user.plan?.name || 'N/A'}`)}
+                                                onClick={() => setViewingClinic(user)}
                                             >
                                                 👁️
                                             </button>
@@ -352,7 +389,30 @@ const MasterPanel = ({ user }) => {
                             {/* Email is read-only usually because changing it in Auth is complex */}
                             <div className="form-group">
                                 <label>Email (Solo lectura)</label>
-                                <input type="text" value={editingSuperAdmin.username} readOnly disabled style={{ background: '#f0f0f0' }} />
+                                <input type="text" value={editingSuperAdmin.username} readOnly disabled style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }} />
+                            </div>
+
+                            <div className="form-group" style={{ marginTop: '10px', padding: '15px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px dashed var(--glass-border)' }}>
+                                <label style={{ color: 'var(--accent)', fontWeight: 'bold' }}>Cambiar Contraseña</label>
+                                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                                    <input
+                                        type="password"
+                                        placeholder="Nueva contraseña"
+                                        value={newPassword}
+                                        onChange={e => setNewPassword(e.target.value)}
+                                        style={{ flex: 1 }}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="btn-process"
+                                        style={{ background: 'var(--accent)', padding: '0 15px' }}
+                                        onClick={handleUpdatePassword}
+                                        disabled={isUpdatingPassword}
+                                    >
+                                        {isUpdatingPassword ? "..." : "Actualizar"}
+                                    </button>
+                                </div>
+                                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '5px' }}>Esto cambiará el acceso del administrador de inmediato.</p>
                             </div>
 
                             <div className="modal-actions">
@@ -365,7 +425,81 @@ const MasterPanel = ({ user }) => {
                     </div>
                 </div>
             )}
-        </div >
+
+            {viewingClinic && (
+                <div className="modal-overlay" onClick={() => setViewingClinic(null)}>
+                    <div className="modal-content premium-modal animate-in" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+                        <div className="modal-header-pro">
+                            <div>
+                                <h2>Información de la Clínica</h2>
+                                <p>Detalles administrativos y de suscripción</p>
+                            </div>
+                            <button className="btn-close" onClick={() => setViewingClinic(null)}>×</button>
+                        </div>
+
+                        <div className="clinic-detail-grid" style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: '20px',
+                            padding: '20px'
+                        }}>
+                            <div className="detail-field">
+                                <label style={{ display: 'block', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: '5px' }}>Nombre Clínica</label>
+                                <p style={{ fontSize: '1.1rem', margin: 0 }}>{viewingClinic.clinic_name}</p>
+                            </div>
+                            <div className="detail-field">
+                                <label style={{ display: 'block', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: '5px' }}>Administrador</label>
+                                <p style={{ fontSize: '1.1rem', margin: 0 }}>{viewingClinic.full_name}</p>
+                            </div>
+                            <div className="detail-field">
+                                <label style={{ display: 'block', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: '5px' }}>Correo Electrónico</label>
+                                <p style={{ fontSize: '1.1rem', margin: 0 }}>{viewingClinic.username}</p>
+                            </div>
+                            <div className="detail-field">
+                                <label style={{ display: 'block', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: '5px' }}>Sedes / Agendas</label>
+                                <p style={{ fontSize: '1.1rem', margin: 0 }}>{viewingClinic.sedesCount} activas</p>
+                            </div>
+                            <div className="detail-field">
+                                <label style={{ display: 'block', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: '5px' }}>Plan Actual</label>
+                                <span className="status-pill confirmada" style={{ background: 'var(--accent)', marginTop: '5px' }}>
+                                    {viewingClinic.plan?.name || "Gratuito"}
+                                </span>
+                            </div>
+                            <div className="detail-field">
+                                <label style={{ display: 'block', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: '5px' }}>Estado de Cuenta</label>
+                                <span className="status-pill confirmada" style={{ marginTop: '5px' }}>Activo / Al Día</span>
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '0 20px 20px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                            <p><strong>ID de Sistema:</strong> {viewingClinic.id}</p>
+                            <p><strong>Registrado el:</strong> {new Date(viewingClinic.created_at).toLocaleDateString()}</p>
+                        </div>
+
+                        <div className="modal-footer" style={{ borderTop: '1px solid var(--glass-border)', padding: '15px 20px', textAlign: 'right' }}>
+                            <button className="btn-secondary" onClick={() => setViewingClinic(null)}>Cerrar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {notification && (
+                <div className={`notification-toast ${notification.type}`} style={{
+                    position: 'fixed',
+                    bottom: '30px',
+                    right: '30px',
+                    padding: '15px 25px',
+                    borderRadius: '12px',
+                    background: notification.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                    color: 'white',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
+                    zIndex: 10000,
+                    animation: 'slideInRight 0.3s forwards'
+                }}>
+                    {notification.message}
+                </div>
+            )}
+        </div>
     );
 };
 

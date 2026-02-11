@@ -1,5 +1,16 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
 
+html {
+  font-size: 16px;
+}
+
+@media (min-width: 1024px) {
+  html {
+    font-size: 18px;
+    /* Esto escalará todos los 'rem' en escritorio */
+  }
+}
+
 :root {
   /* Common values */
   --font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
@@ -52,10 +63,20 @@ body {
   min-height: 100vh;
   transition: background var(--transition-speed), color var(--transition-speed);
   overflow-x: hidden;
+  font-size: 15px;
+  /* Base ligeramente mayor */
+}
+
+@media (min-width: 1024px) {
+  body {
+    font-size: 17px;
+    /* Aumentar legibilidad en escritorio */
+  }
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1800px;
+  /* Incrementado desde 1200px para pantallas grandes */
   margin: 0 auto;
   padding: 20px;
   width: 100%;
@@ -1136,7 +1157,10 @@ tr:hover td {
   box-shadow: var(--glass-shadow);
   height: 90vh;
   margin: 20px auto;
-  max-width: 1400px;
+  max-width: 1700px;
+  /* Incrementado desde 1400px */
+  width: 96%;
+  /* Aprovechar más el ancho disponible */
   position: relative;
   z-index: 100;
   transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1383,19 +1407,22 @@ tr:hover td {
 }
 
 .form-group label {
-  font-size: 0.85rem;
+  font-size: 0.95rem;
+  /* Aumentado de 0.85rem */
   font-weight: 500;
   color: var(--text-muted);
 }
 
 .form-group input,
-.form-group textarea {
+.form-group textarea,
+.form-group select {
   background: var(--input-bg);
   border: 1px solid var(--glass-border);
   color: var(--text-main);
   padding: 12px;
   border-radius: 12px;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
+  /* Aumentado de 0.95rem */
 }
 
 /* --- Inline Forms --- */
@@ -1440,7 +1467,8 @@ tr:hover td {
 
 .config-grid .premium-card {
   width: 100%;
-  max-width: 1000px;
+  max-width: 1400px;
+  /* Incrementado desde 1000px */
   margin: 0 auto;
 }
 
@@ -3093,46 +3121,67 @@ tr:hover td {
   background: rgba(0, 0, 0, 0.1);
   margin-top: 15px;
 }
+
 /* --- Patient Suggestions Dropdown --- */
 .suggestions-list-overlay {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: var(--card-bg);
-    border: 1px solid var(--glass-border);
-    border-radius: 12px;
-    z-index: 1000;
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(var(--surface-blur));
-    margin-top: 5px;
-    overflow: hidden;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--card-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  z-index: 1000;
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--surface-blur));
+  margin-top: 5px;
+  overflow: hidden;
 }
 
 .suggestion-item {
-    padding: 10px 15px;
-    display: flex;
-    flex-direction: column;
-    cursor: pointer;
-    transition: background 0.2s;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+  padding: 10px 15px;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  transition: background 0.2s;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .suggestion-item:last-child {
-    border-bottom: none;
+  border-bottom: none;
 }
 
 .suggestion-item:hover {
-    background: rgba(var(--primary-rgb), 0.1);
+  background: rgba(var(--primary-rgb), 0.1);
 }
 
 .suggestion-item strong {
-    color: var(--text-main);
-    font-size: 0.95rem;
+  color: var(--text-main);
+  font-size: 0.95rem;
 }
 
 .suggestion-item span {
-    color: var(--text-muted);
-    font-size: 0.8rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
 }
 
+
+/* --- Notifications --- */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.notification-toast {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-weight: 500;
+}

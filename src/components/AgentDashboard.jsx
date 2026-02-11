@@ -1,6 +1,209 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../supabase";
 
+const SmsLogsList = ({ phone, clinicId }) => {
+    const [logs, setLogs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [retrying, setRetrying] = useState(null);
+
+    const fetchLogs = async () => {
+        setLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('sms_logs')
+                .select('*')
+                .eq('clinic_id', clinicId)
+                .eq('patient_phone', phone)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            setLogs(data || []);
+        } catch (e) {
+            console.error("Error loading SMS logs:", e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (phone && clinicId) fetchLogs();
+    }, [phone, clinicId]);
+
+    const handleRetry = async (log) => {
+        setRetrying(log.id);
+        try {
+            const { data, error } = await supabase.functions.invoke('send-sms-infobip', {
+                body: {
+                    clinicId,
+                    phone: log.patient_phone,
+                    message: log.message_content,
+                    patientName: log.patient_name
+                }
+            });
+            if (error) throw error;
+            alert("SMS reenviado con éxito");
+            fetchLogs();
+        } catch (e) {
+            console.error(e);
+            alert("Error al reenviar: " + e.message);
+        } finally {
+            setRetrying(null);
+        }
+    };
+
+    if (loading) return <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.8rem' }}>Cargando historial de mensajes...</div>;
+
+    if (logs.length === 0) return <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No se han enviado mensajes SMS a este número.</div>;
+
+    return (
+        <div className="sms-logs-items" style={{ padding: '10px' }}>
+            {logs.map(log => (
+                <div key={log.id} style={{
+                    padding: '10px',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    fontSize: '0.8rem'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                        <span style={{
+                            color: log.status === 'success' ? 'var(--success)' : 'var(--danger)',
+                            fontWeight: 'bold',
+                            textTransform: 'uppercase'
+                        }}>
+                            {log.status === 'success' ? '✓ Enviado' : '✗ Fallido'}
+                        </span>
+                        <span style={{ color: 'var(--text-muted)' }}>{new Date(log.created_at).toLocaleString()}</span>
+                    </div>
+                    <p style={{ margin: 0, color: 'var(--text-main)', opacity: 0.9 }}>{log.message_content}</p>
+                    {log.error_details && <p style={{ margin: '5px 0 0 0', color: 'var(--danger)', fontSize: '0.7rem' }}>Error: {log.error_details}</p>}
+
+                    {log.status !== 'success' && (
+                        <button
+                            onClick={() => handleRetry(log)}
+                            disabled={retrying === log.id}
+                            style={{
+                                marginTop: '10px',
+                                padding: '4px 8px',
+                                background: 'var(--accent)',
+                                border: 'none',
+                                borderRadius: '4px',
+                                color: 'white',
+                                cursor: 'pointer',
+                                fontSize: '0.7rem'
+                            }}
+                        >
+                            {retrying === log.id ? 'Reenviando...' : '🔄 Reintentar Envío'}
+                        </button>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+};
+
+const EmailLogsList = ({ email, clinicId }) => {
+    const [logs, setLogs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [retrying, setRetrying] = useState(null);
+
+    const fetchLogs = async () => {
+        setLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('email_logs')
+                .select('*')
+                .eq('clinic_id', clinicId)
+                .eq('patient_email', email)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            setLogs(data || []);
+        } catch (e) {
+            console.error("Error loading Email logs:", e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (email && clinicId) fetchLogs();
+    }, [email, clinicId]);
+
+    const handleRetry = async (log) => {
+        if (!log.message_content) {
+            alert("No se puede reintentar: El contenido del mensaje no fue guardado en este log antiguo.");
+            return;
+        }
+        setRetrying(log.id);
+        try {
+            const { data, error } = await supabase.functions.invoke('send-email-hostinger', {
+                body: {
+                    clinicId,
+                    to: log.patient_email,
+                    subject: log.subject,
+                    body: log.message_content,
+                    patientName: log.patient_name
+                }
+            });
+            if (error) throw error;
+            alert("Email reenviado con éxito");
+            fetchLogs();
+        } catch (e) {
+            console.error(e);
+            alert("Error al reenviar email: " + e.message);
+        } finally {
+            setRetrying(null);
+        }
+    };
+
+    if (loading) return <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.8rem' }}>Cargando historial de correos...</div>;
+
+    if (logs.length === 0) return <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No se han enviado correos a esta dirección.</div>;
+
+    return (
+        <div className="email-logs-items" style={{ padding: '10px' }}>
+            {logs.map(log => (
+                <div key={log.id} style={{
+                    padding: '10px',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    fontSize: '0.8rem'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                        <span style={{
+                            color: log.status === 'success' ? 'var(--success)' : 'var(--danger)',
+                            fontWeight: 'bold',
+                            textTransform: 'uppercase'
+                        }}>
+                            {log.status === 'success' ? '✓ Enviado' : '✗ Fallido'}
+                        </span>
+                        <span style={{ color: 'var(--text-muted)' }}>{new Date(log.created_at).toLocaleString()}</span>
+                    </div>
+                    <p style={{ margin: 0, color: 'var(--text-main)', opacity: 0.9 }}><strong>{log.subject}</strong></p>
+                    {log.error_details && <p style={{ margin: '5px 0 0 0', color: 'var(--danger)', fontSize: '0.7rem' }}>Error: {log.error_details}</p>}
+
+                    {log.status !== 'success' && (
+                        <button
+                            onClick={() => handleRetry(log)}
+                            disabled={retrying === log.id}
+                            style={{
+                                marginTop: '10px',
+                                padding: '4px 8px',
+                                background: 'var(--accent)',
+                                border: 'none',
+                                borderRadius: '4px',
+                                color: 'white',
+                                cursor: 'pointer',
+                                fontSize: '0.7rem'
+                            }}
+                        >
+                            {retrying === log.id ? 'Reenviando...' : '🔄 Reintentar Envío'}
+                        </button>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+};
+
 const AgentDashboard = ({ user }) => {
     const [loading, setLoading] = useState(true);
     const [isFetching, setIsFetching] = useState(false);
@@ -352,6 +555,36 @@ const AgentDashboard = ({ user }) => {
                                     color: showDetail.observaciones ? 'var(--text-main)' : 'var(--text-muted)'
                                 }}>
                                     {showDetail.observaciones || 'Sin observaciones registradas.'}
+                                </div>
+                            </div>
+
+                            {/* --- LISTADO DE SMS Y EMAIL ENVIADOS --- */}
+                            <div className="logs-container" style={{ gridColumn: 'span 2', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '10px' }}>
+                                <div className="sms-logs-section">
+                                    <label style={{ color: 'var(--primary)', fontWeight: '700', fontSize: '0.7rem', textTransform: 'uppercase' }}>Historial SMS</label>
+                                    <div style={{
+                                        marginTop: '10px',
+                                        background: 'rgba(0,0,0,0.2)',
+                                        borderRadius: '12px',
+                                        border: '1px solid var(--glass-border)',
+                                        maxHeight: '200px',
+                                        overflowY: 'auto'
+                                    }}>
+                                        <SmsLogsList phone={showDetail.celular} clinicId={user.clinic_id || user.id} />
+                                    </div>
+                                </div>
+                                <div className="email-logs-section">
+                                    <label style={{ color: 'var(--primary)', fontWeight: '700', fontSize: '0.7rem', textTransform: 'uppercase' }}>Historial Email</label>
+                                    <div style={{
+                                        marginTop: '10px',
+                                        background: 'rgba(0,0,0,0.2)',
+                                        borderRadius: '12px',
+                                        border: '1px solid var(--glass-border)',
+                                        maxHeight: '200px',
+                                        overflowY: 'auto'
+                                    }}>
+                                        <EmailLogsList email={showDetail.email} clinicId={user.clinic_id || user.id} />
+                                    </div>
                                 </div>
                             </div>
                         </div>

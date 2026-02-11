@@ -18,6 +18,31 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [selectedAgendaForHours, setSelectedAgendaForHours] = useState(null);
     const [allAgendaServices, setAllAgendaServices] = useState([]);
 
+    // SMS Automation States
+    const [infobipConfig, setInfobipConfig] = useState({ api_key: "", base_url: "", sender_id: "CRM_SMS", is_active: true });
+    const [smsTemplates, setSmsTemplates] = useState([
+        { event_type: 'booking_confirmation', content: "Hola {paciente}, tu cita ha sido agendada para el {fecha} a las {hora}. ¡Te esperamos!", is_active: true },
+        { event_type: 'reminder_24h', content: "Recordatorio: {paciente}, tienes una cita mañana {fecha} a las {hora}. Por favor confirma.", is_active: true },
+        { event_type: 'immediate_attention', content: "Aviso Urgente: {paciente}, tu cita está próxima. Favor llegar 15 min antes.", is_active: false }
+    ]);
+    const [savingSms, setSavingSms] = useState(false);
+
+    // Email Automation States
+    const [emailConfig, setEmailConfig] = useState({
+        smtp_host: "smtp.hostinger.com",
+        smtp_port: 465,
+        smtp_user: "",
+        smtp_pass: "",
+        from_email: "",
+        from_name: "CRM System",
+        is_active: true
+    });
+    const [emailTemplates, setEmailTemplates] = useState([
+        { event_type: 'booking_confirmation', subject: "Confirmación de Cita - {paciente}", content: "Hola {paciente}, tu cita ha sido agendada para el {fecha} a las {hora}. ¡Te esperamos!", is_active: true },
+        { event_type: 'reminder_24h', subject: "Recordatorio de Cita Mañana", content: "Recordatorio: {paciente}, tienes una cita mañana {fecha} a las {hora}. Por favor confirma.", is_active: true }
+    ]);
+    const [savingEmail, setSavingEmail] = useState(false);
+
     // States for Modals
     const [showAgentModal, setShowAgentModal] = useState(null); // stores agenda object
     const [showEditAgenda, setShowEditAgenda] = useState(null);
@@ -36,6 +61,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     });
     const [newBlock, setNewBlock] = useState({ agenda_id: "", fecha_inicio: "", fecha_fin: "", hora_inicio: "", hora_fin: "", es_todo_el_dia: 0, motivo: "", service_id: "", tipo: 1 });
     const [newAlert, setNewAlert] = useState({ agenda_id: "", mensaje: "", tipo: "info" });
+
+    // Logs State
+    const [globalSmsLogs, setGlobalSmsLogs] = useState([]);
+    const [globalEmailLogs, setGlobalEmailLogs] = useState([]);
+    const [loadingLogs, setLoadingLogs] = useState(false);
+    const [retryingLog, setRetryingLog] = useState(null);
 
     // Service Hours State
     const [showServiceHoursModal, setShowServiceHoursModal] = useState(null);
@@ -67,102 +98,141 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            // 0. Determinar Clinic ID del usuario actual
             const { data: { user } } = await supabase.auth.getUser();
-            let currentClinicId = null;
+            if (!user) return;
 
-            if (user) {
-                // Fetch full profile to get clinic_id
-                const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user.id).single();
-                // If I am superuser, my ID is the clinic_id (or I have it set to self). If I am admin/agent, I use my profile's clinic_id.
-                // However, based on my previous logic: SuperAdmin has clinic_id = self.id.
-                // So checking profile.clinic_id is the safest general way.
-                currentClinicId = profile?.clinic_id;
-            }
+            const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user.id).single();
+            const currentClinicId = profile?.clinic_id || user.id;
 
-            // Cargar Agendas con sus usuarios vinculados para detectar asignaciones
-            let agendaQuery = supabase
-                .from('agendas')
-                .select('*, users:agenda_users(id:user_id)');
-
-            if (userRole !== 'owner') {
-                // If I am not the owner, I MUST be restricted to my clinic_id.
-                // If my clinic_id is null (legacy), I only see nulls.
-                // If I have a clinic_id, I only see matching agendas.
-                agendaQuery = agendaQuery.eq('clinic_id', currentClinicId);
-            }
-
-            const { data: agData, error: agError } = await agendaQuery;
-
-            if (agError) throw agError;
-            let agendasList = agData || [];
-
-            // Si es admin (pero no superuser), filtrar solo las agendas asignadas
-            if (userRole === "admin") {
-                const { data: { session } } = await supabase.auth.getSession();
-                agendasList = agendasList.filter(a => a.users && a.users.some(u => u.id === session?.user?.id));
-            }
-
-            setAgendas(agendasList);
+            // --- CARGAR AGENDAS ---
+            const { data: agRes } = await supabase.from('agendas').select('*, users:profiles(*)').eq('clinic_id', currentClinicId);
+            setAgendas(agRes || []);
 
             // Auto-seleccionar primera agenda si no hay ninguna para servicios
-            if (!selectedAgendaForOffers && agendasList.length > 0) {
-                setSelectedAgendaForOffers(agendasList[0]);
-                fetchAgendaOffers(agendasList[0]);
+            if (!selectedAgendaForOffers && agRes && agRes.length > 0) {
+                setSelectedAgendaForOffers(agRes[0]);
+                fetchAgendaOffers(agRes[0]);
             } else if (selectedAgendaForOffers) {
                 fetchAgendaOffers(selectedAgendaForOffers);
             }
 
-            // Cargar Usuarios (Profiles) si es superuser, admin u owner
-            if (userRole === "superuser" || userRole === "admin" || userRole === "owner") {
-                let profilesQuery = supabase.from('profiles').select('*, agendas:agenda_users(agenda:agendas(id, name))');
+            // --- CARGAR PERSONAL ---
+            const { data: usrRes } = await supabase.from('profiles').select('*').eq('clinic_id', currentClinicId);
+            setUsers(usrRes || []);
 
-                if (userRole !== 'owner') {
-                    profilesQuery = profilesQuery.eq('clinic_id', currentClinicId);
-                }
+            // --- CARGAR BLOQUEOS ---
+            const { data: blRes } = await supabase.from('bloqueos').select('*, service:global_services(*)').eq('clinic_id', currentClinicId);
+            setBlocks(blRes || []);
 
-                const { data: usData, error: usError } = await profilesQuery;
-                if (usError) throw usError;
-                setUsers(usData || []);
+            // --- CARGAR ALERTAS ---
+            const { data: alRes } = await supabase.from('alertas').select('*');
+            setAlerts(alRes || []);
+
+            // --- CARGAR HORARIOS ---
+            const { data: horRes } = await supabase.from('horarios_atencion').select('*');
+            setHorarios(horRes || []);
+
+            // --- CARGAR SERVICIOS GLOBALES ---
+            const { data: servRes } = await supabase.from('global_services').select('*').eq('clinic_id', currentClinicId);
+            setGlobalServices(servRes || []);
+
+            // --- CARGAR CONFIG SMS ---
+            const { data: sConfig } = await supabase.from('infobip_configs').select('*').eq('clinic_id', currentClinicId).maybeSingle();
+            if (sConfig) setInfobipConfig(sConfig);
+
+            const { data: sTemplates } = await supabase.from('sms_templates').select('*').eq('clinic_id', currentClinicId);
+            if (sTemplates && sTemplates.length > 0) {
+                setSmsTemplates(prev => {
+                    const newTempl = [...prev];
+                    sTemplates.forEach(t => {
+                        const idx = newTempl.findIndex(nt => nt.event_type === t.event_type);
+                        if (idx !== -1) newTempl[idx] = t;
+                        else newTempl.push(t);
+                    });
+                    return newTempl;
+                });
             }
 
-            // Catálogo Maestro (Filtrado por Clínica)
-            let servicesQuery = supabase.from('global_services').select('*');
-            if (userRole !== 'owner') {
-                // If I am not owner, strict isolation.
-                // If my clinic_id is null, I only see nulls (legacy/global?)
-                servicesQuery = servicesQuery.eq('clinic_id', currentClinicId);
+            // --- CARGAR CONFIG EMAIL ---
+            const { data: eConfig } = await supabase.from('email_configs').select('*').eq('clinic_id', currentClinicId).maybeSingle();
+            if (eConfig) setEmailConfig(eConfig);
+
+            const { data: eTemplates } = await supabase.from('email_templates').select('*').eq('clinic_id', currentClinicId);
+            if (eTemplates && eTemplates.length > 0) {
+                setEmailTemplates(prev => {
+                    const newTempl = [...prev];
+                    eTemplates.forEach(t => {
+                        const idx = newTempl.findIndex(nt => nt.event_type === t.event_type);
+                        if (idx !== -1) newTempl[idx] = t;
+                        else newTempl.push(t);
+                    });
+                    return newTempl;
+                });
             }
-            const { data: sData, error: sError } = await servicesQuery;
-
-            if (sError) throw sError;
-            setGlobalServices(sData || []);
-
-            // Cargar Bloqueos, Alertas, Horarios y Mapeo de Servicios-Agenda
-            // SOLO de las agendas cargadas (Aislamiento fuerte)
-            const agendaIds = agendasList.map(a => a.id);
-
-            if (agendaIds.length > 0) {
-                const [bRes, aRes, hRes, asRes] = await Promise.all([
-                    supabase.from('bloqueos').select('*').in('agenda_id', agendaIds),
-                    supabase.from('alertas').select('*').in('agenda_id', agendaIds),
-                    supabase.from('horarios_atencion').select('*').in('agenda_id', agendaIds),
-                    supabase.from('agenda_services').select('agenda_id, service_id').in('agenda_id', agendaIds)
-                ]);
-
-                setBlocks(bRes.data || []);
-                setAlerts(aRes.data || []);
-                setHorarios(hRes.data || []);
-                setAllAgendaServices(asRes.data || []);
-            } else {
-                setBlocks([]);
-                setAlerts([]);
-                setHorarios([]);
-                setAllAgendaServices([]);
-            }
-
-        } catch (error) { console.error("Error fetching data:", error); }
+        } catch (error) {
+            console.error("Error fetching data:", error);
+        }
         setLoading(false);
+    };
+
+    const fetchGlobalLogs = async () => {
+        setLoadingLogs(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user?.id).single();
+            const clinicId = profile?.clinic_id || user?.id;
+
+            const [smsRes, emailRes] = await Promise.all([
+                supabase.from('sms_logs').select('*').eq('clinic_id', clinicId).order('created_at', { ascending: false }).limit(50),
+                supabase.from('email_logs').select('*').eq('clinic_id', clinicId).order('created_at', { ascending: false }).limit(50)
+            ]);
+
+            setGlobalSmsLogs(smsRes.data || []);
+            setGlobalEmailLogs(emailRes.data || []);
+        } catch (e) {
+            console.error("Error fetching global logs:", e);
+        } finally {
+            setLoadingLogs(false);
+        }
+    };
+
+    const handleRetryGlobal = async (log, type) => {
+        setRetryingLog(log.id);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user?.id).single();
+            const clinicId = profile?.clinic_id || user?.id;
+
+            if (type === 'sms') {
+                const { error } = await supabase.functions.invoke('send-sms-infobip', {
+                    body: {
+                        clinicId,
+                        phone: log.patient_phone,
+                        message: log.message_content,
+                        patientName: log.patient_name
+                    }
+                });
+                if (error) throw error;
+            } else {
+                if (!log.message_content) throw new Error("No hay contenido guardado para reintentar este correo antiguo");
+                const { error } = await supabase.functions.invoke('send-email-hostinger', {
+                    body: {
+                        clinicId,
+                        to: log.patient_email,
+                        subject: log.subject,
+                        body: log.message_content,
+                        patientName: log.patient_name
+                    }
+                });
+                if (error) throw error;
+            }
+            alert("Reenviado con éxito");
+            fetchGlobalLogs();
+        } catch (e) {
+            alert("Error: " + e.message);
+        } finally {
+            setRetryingLog(null);
+        }
     };
 
     const handleClearDay = (agendaId, dayIndex) => {
@@ -927,6 +997,413 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         </div>
     );
 
+    const handleSaveSMS = async (e) => {
+        e.preventDefault();
+        setSavingSms(true);
+        try {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) return;
+
+            const configToSave = {
+                clinic_id: authUser.id,
+                api_key: infobipConfig.api_key,
+                base_url: infobipConfig.base_url,
+                sender_id: infobipConfig.sender_id,
+                is_active: infobipConfig.is_active
+            };
+            const { error: cfgError } = await supabase.from('infobip_configs').upsert(configToSave, { onConflict: 'clinic_id' });
+            if (cfgError) throw cfgError;
+
+            for (const t of smsTemplates) {
+                const { error: tError } = await supabase.from('sms_templates').upsert({
+                    clinic_id: authUser.id,
+                    event_type: t.event_type,
+                    content: t.content,
+                    is_active: t.is_active
+                }, { onConflict: 'clinic_id,event_type' });
+                if (tError) throw tError;
+            }
+            alert("Configuración de SMS guardada correctamente.");
+        } catch (error) {
+            console.error(error);
+            alert("Error al guardar: " + error.message);
+        } finally {
+            setSavingSms(false);
+        }
+    };
+
+    const handleSaveEmail = async (e) => {
+        e.preventDefault();
+        setSavingEmail(true);
+        try {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) return;
+
+            const configToSave = {
+                clinic_id: authUser.id,
+                smtp_host: emailConfig.smtp_host,
+                smtp_port: parseInt(emailConfig.smtp_port),
+                smtp_user: emailConfig.smtp_user,
+                smtp_pass: emailConfig.smtp_pass,
+                from_email: emailConfig.from_email,
+                from_name: emailConfig.from_name,
+                is_active: emailConfig.is_active
+            };
+            const { error: cfgError } = await supabase.from('email_configs').upsert(configToSave, { onConflict: 'clinic_id' });
+            if (cfgError) throw cfgError;
+
+            for (const t of emailTemplates) {
+                const { error: tError } = await supabase.from('email_templates').upsert({
+                    clinic_id: authUser.id,
+                    event_type: t.event_type,
+                    subject: t.subject,
+                    content: t.content,
+                    is_active: t.is_active
+                }, { onConflict: 'clinic_id,event_type' });
+                if (tError) throw tError;
+            }
+
+            alert("Configuración de Email guardada correctamente.");
+        } catch (err) {
+            console.error(err);
+            alert("Error al guardar email: " + err.message);
+        } finally {
+            setSavingEmail(false);
+        }
+    };
+
+    const renderSMS = () => (
+        <div className="admin-section fade-in">
+            <div className="section-header">
+                <h3>📲 Automatización de Mensajes SMS (Infobip)</h3>
+                <p className="text-muted">Configura tus credenciales y plantillas para envíos automáticos.</p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginTop: '20px' }}>
+                <div className="card" style={{ padding: '25px' }}>
+                    <h4 style={{ marginBottom: '20px' }}>🔑 Credenciales de Infobip</h4>
+                    <form onSubmit={handleSaveSMS} className="premium-form-v">
+                        <div className="form-group">
+                            <label>Infobip API Key</label>
+                            <input type="password" value={infobipConfig.api_key} onChange={e => setInfobipConfig({ ...infobipConfig, api_key: e.target.value })} placeholder="Pega tu API Key aquí" required />
+                        </div>
+                        <div className="form-group">
+                            <label>Base URL (Infobip API)</label>
+                            <input type="text" value={infobipConfig.base_url} onChange={e => setInfobipConfig({ ...infobipConfig, base_url: e.target.value })} placeholder="ej: https://xyz123.api.infobip.com" required />
+                        </div>
+                        <div className="form-group">
+                            <label>Sender ID</label>
+                            <input type="text" value={infobipConfig.sender_id} onChange={e => setInfobipConfig({ ...infobipConfig, sender_id: e.target.value })} placeholder="Ej: CRM_APP" />
+                        </div>
+                        <div className="form-group" style={{ flexDirection: 'row', gap: '10px', alignItems: 'center' }}>
+                            <input type="checkbox" checked={infobipConfig.is_active} onChange={e => setInfobipConfig({ ...infobipConfig, is_active: e.target.checked })} id="sms_active" />
+                            <label htmlFor="sms_active" style={{ cursor: 'pointer' }}>Servicio Activo</label>
+                        </div>
+                        <button type="submit" className="btn-process" disabled={savingSms}>
+                            {savingSms ? "Guardando..." : "💾 Guardar Configuración"}
+                        </button>
+                    </form>
+                </div>
+
+                <div className="card" style={{ padding: '25px' }}>
+                    <h4 style={{ marginBottom: '20px' }}>📝 Plantillas de Mensajes</h4>
+                    <div className="premium-form-v">
+                        {smsTemplates.map((t, idx) => (
+                            <div key={idx} className="template-item" style={{ marginBottom: '20px', padding: '15px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                    <strong>{t.event_type === 'booking_confirmation' ? '📅 Nueva Cita' : t.event_type === 'reminder_24h' ? '⏰ Recordatorio 24h' : '🚨 Atención Inmediata'}</strong>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                        <input type="checkbox" checked={t.is_active} onChange={e => {
+                                            const newT = [...smsTemplates];
+                                            newT[idx].is_active = e.target.checked;
+                                            setSmsTemplates(newT);
+                                        }} />
+                                        <small>Activo</small>
+                                    </div>
+                                </div>
+                                <textarea value={t.content} onChange={e => {
+                                    const newT = [...smsTemplates];
+                                    newT[idx].content = e.target.value;
+                                    setSmsTemplates(newT);
+                                }} rows="3" style={{ width: '100%', fontSize: '0.85rem' }} />
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '5px' }}>Variables: <code>{`{paciente}`}</code>, <code>{`{fecha}`}</code>, <code>{`{hora}`}</code></div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
+    const renderEmail = () => (
+        <div className="admin-section fade-in">
+            <div className="section-header">
+                <div>
+                    <h1>📧 Configuración de Email (SMTP Hostinger)</h1>
+                    <p>Configura tus credenciales de correo para enviar confirmaciones automáticas.</p>
+                </div>
+            </div>
+
+            <div className="config-grid">
+                <form className="premium-card" onSubmit={handleSaveEmail}>
+                    <div className="card-header-pro">
+                        <h3>🔑 Credenciales SMTP</h3>
+                    </div>
+
+                    <div className="premium-form-v" style={{ marginTop: '20px' }}>
+                        <div className="form-group">
+                            <label>Servidor SMTP (Host)</label>
+                            <input
+                                type="text"
+                                value={emailConfig.smtp_host}
+                                onChange={e => setEmailConfig({ ...emailConfig, smtp_host: e.target.value })}
+                                placeholder="smtp.hostinger.com"
+                                required
+                            />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <div className="form-group">
+                                <label>Puerto</label>
+                                <input
+                                    type="number"
+                                    value={emailConfig.smtp_port}
+                                    onChange={e => setEmailConfig({ ...emailConfig, smtp_port: e.target.value })}
+                                    placeholder="465"
+                                    required
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Estado</label>
+                                <select
+                                    value={emailConfig.is_active}
+                                    onChange={e => setEmailConfig({ ...emailConfig, is_active: e.target.value === "true" })}
+                                >
+                                    <option value="true">Activo</option>
+                                    <option value="false">Inactivo</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label>Usuario (Email)</label>
+                            <input
+                                type="email"
+                                value={emailConfig.smtp_user}
+                                onChange={e => setEmailConfig({ ...emailConfig, smtp_user: e.target.value })}
+                                placeholder="tu@dominio.com"
+                                required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Contraseña</label>
+                            <input
+                                type="password"
+                                value={emailConfig.smtp_pass}
+                                onChange={e => setEmailConfig({ ...emailConfig, smtp_pass: e.target.value })}
+                                placeholder="••••••••"
+                                required
+                            />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <div className="form-group">
+                                <label>Email Remitente (From)</label>
+                                <input
+                                    type="email"
+                                    value={emailConfig.from_email}
+                                    onChange={e => setEmailConfig({ ...emailConfig, from_email: e.target.value })}
+                                    placeholder="noreply@dominio.com"
+                                    required
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Nombre Remitente</label>
+                                <input
+                                    type="text"
+                                    value={emailConfig.from_name}
+                                    onChange={e => setEmailConfig({ ...emailConfig, from_name: e.target.value })}
+                                    placeholder="Mi Clínica CRM"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="card-header-pro" style={{ marginTop: '40px', borderTop: '1px solid var(--glass-border)', paddingTop: '20px' }}>
+                        <h3>📝 Plantillas de Correo</h3>
+                        <p>Usa variables como: {"{paciente}"}, {"{fecha}"}, {"{hora}"}</p>
+                    </div>
+
+                    {emailTemplates.map((t, idx) => (
+                        <div key={t.event_type} className="template-box" style={{
+                            marginTop: '20px',
+                            padding: '20px',
+                            background: 'rgba(255,255,255,0.03)',
+                            borderRadius: '16px',
+                            border: '1px solid var(--glass-border)'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                                <span className="pro-badge" style={{ textTransform: 'uppercase' }}>
+                                    {t.event_type === 'booking_confirmation' ? 'Confirmación' : t.event_type === 'reminder_24h' ? 'Recordatorio 24h' : 'Varios'}
+                                </span>
+                                <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    Activo:
+                                    <input
+                                        type="checkbox"
+                                        checked={t.is_active}
+                                        onChange={e => {
+                                            const newT = [...emailTemplates];
+                                            newT[idx].is_active = e.target.checked;
+                                            setEmailTemplates(newT);
+                                        }}
+                                    />
+                                </label>
+                            </div>
+                            <div className="form-group" style={{ marginBottom: '15px' }}>
+                                <label>Asunto (Subject)</label>
+                                <input
+                                    type="text"
+                                    value={t.subject}
+                                    onChange={e => {
+                                        const newT = [...emailTemplates];
+                                        newT[idx].subject = e.target.value;
+                                        setEmailTemplates(newT);
+                                    }}
+                                    placeholder="Asunto del correo"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Contenido del Correo (HTML permitido)</label>
+                                <textarea
+                                    rows="5"
+                                    value={t.content}
+                                    onChange={e => {
+                                        const newT = [...emailTemplates];
+                                        newT[idx].content = e.target.value;
+                                        setEmailTemplates(newT);
+                                    }}
+                                    style={{ width: '100%', boxSizing: 'border-box' }}
+                                />
+                            </div>
+                        </div>
+                    ))}
+
+                    <button className="btn-process" type="submit" disabled={savingEmail} style={{ marginTop: '30px', width: '100%' }}>
+                        {savingEmail ? 'Guardando...' : '💾 Guardar Configuración de Email'}
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+
+    const renderLogs = () => {
+        if (loadingLogs) return <div style={{ textAlign: 'center', padding: '50px' }}>Cargando registros de envío...</div>;
+
+        return (
+            <div className="admin-section-card glass-panel" style={{ padding: '30px', borderRadius: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.5rem', color: 'var(--text-main)' }}>📜 Monitoreo de Notificaciones</h3>
+                    <button className="btn-secondary" onClick={fetchGlobalLogs} style={{ padding: '8px 15px' }}>🔄 Actualizar</button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
+                    {/* SMS column */}
+                    <div>
+                        <h4 style={{ color: 'var(--accent)', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            📲 Historial SMS (Últimos 50)
+                        </h4>
+                        <div style={{ maxHeight: '600px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                            {globalSmsLogs.length === 0 ? <p className="text-muted text-center" style={{ padding: '40px' }}>No hay registros de SMS</p> :
+                                globalSmsLogs.map(log => (
+                                    <div key={log.id} style={{
+                                        background: 'rgba(255,255,255,0.03)',
+                                        padding: '15px',
+                                        borderRadius: '12px',
+                                        border: '1px solid rgba(255,255,255,0.05)'
+                                    }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                            <span style={{
+                                                color: log.status === 'success' ? 'var(--success)' : 'var(--danger)',
+                                                fontWeight: 'bold',
+                                                fontSize: '0.7rem',
+                                                padding: '2px 8px',
+                                                borderRadius: '20px',
+                                                background: log.status === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'
+                                            }}>
+                                                {log.status === 'success' ? 'ENVIADO' : 'FALLIDO'}
+                                            </span>
+                                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{new Date(log.created_at).toLocaleString()}</span>
+                                        </div>
+                                        <p style={{ fontSize: '0.85rem', margin: '4px 0', color: 'var(--text-main)' }}><strong>{log.patient_name}</strong> ({log.patient_phone})</p>
+                                        <p style={{ fontSize: '0.8rem', margin: '10px 0', opacity: 0.8, background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '4px', color: 'var(--text-main)' }}>
+                                            {log.message_content}
+                                        </p>
+                                        {log.status !== 'success' && (
+                                            <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                <span style={{ color: 'var(--danger)', fontSize: '0.75rem' }}>❌ Error: {log.error_details}</span>
+                                                <button
+                                                    className="btn-process"
+                                                    onClick={() => handleRetryGlobal(log, 'sms')}
+                                                    disabled={retryingLog === log.id}
+                                                    style={{ fontSize: '0.75rem', padding: '6px' }}
+                                                >
+                                                    {retryingLog === log.id ? 'Reenviando...' : '🔄 Reintentar Envío'}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                        </div>
+                    </div>
+
+                    {/* Email column */}
+                    <div>
+                        <h4 style={{ color: 'var(--accent)', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            📧 Historial Email (Últimos 50)
+                        </h4>
+                        <div style={{ maxHeight: '600px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                            {globalEmailLogs.length === 0 ? <p className="text-muted text-center" style={{ padding: '40px' }}>No hay registros de Email</p> :
+                                globalEmailLogs.map(log => (
+                                    <div key={log.id} style={{
+                                        background: 'rgba(255,255,255,0.03)',
+                                        padding: '15px',
+                                        borderRadius: '12px',
+                                        border: '1px solid rgba(255,255,255,0.05)'
+                                    }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                            <span style={{
+                                                color: log.status === 'success' ? 'var(--success)' : 'var(--danger)',
+                                                fontWeight: 'bold',
+                                                fontSize: '0.7rem',
+                                                padding: '2px 8px',
+                                                borderRadius: '20px',
+                                                background: log.status === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'
+                                            }}>
+                                                {log.status === 'success' ? 'ENVIADO' : 'FALLIDO'}
+                                            </span>
+                                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{new Date(log.created_at).toLocaleString()}</span>
+                                        </div>
+                                        <p style={{ fontSize: '0.85rem', margin: '4px 0', color: 'var(--text-main)' }}><strong>{log.patient_name}</strong> ({log.patient_email})</p>
+                                        <p style={{ fontSize: '0.85rem', margin: '4px 0', color: 'var(--text-main)' }}><strong>Asunto:</strong> {log.subject}</p>
+                                        {log.status !== 'success' && (
+                                            <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                <span style={{ color: 'var(--danger)', fontSize: '0.75rem' }}>❌ Error: {log.error_details}</span>
+                                                <button
+                                                    className="btn-process"
+                                                    onClick={() => handleRetryGlobal(log, 'email')}
+                                                    disabled={retryingLog === log.id}
+                                                    style={{ fontSize: '0.75rem', padding: '6px' }}
+                                                >
+                                                    {retryingLog === log.id ? 'Reenviando...' : '🔄 Reintentar Envío'}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="admin-panel-premium">
             <div className="admin-sidebar">
@@ -943,6 +1420,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <>
                             <button className={activeView === "servicios" ? "active" : ""} onClick={() => setActiveView("servicios")}>🛒 Servicios</button>
                             <button className={activeView === "horarios" ? "active" : ""} onClick={() => setActiveView("horarios")}>🕒 Horarios</button>
+                            {(userRole === "superuser" || userRole === "owner") && (
+                                <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 SMS Automatizados</button>
+                            )}
+                            {(userRole === "superuser" || userRole === "owner") && (
+                                <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 Email Automatizados</button>
+                            )}
+                            <button className={activeView === "logs" ? "active" : ""} onClick={() => { setActiveView("logs"); fetchGlobalLogs(); }}>📜 Monitoreo</button>
                         </>
                     )}
                 </nav>
@@ -957,6 +1441,9 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "alertas" && renderAlertas()}
                     {activeView === "servicios" && renderConfigServicios()}
                     {activeView === "horarios" && renderConfigHorarios()}
+                    {activeView === "sms" && renderSMS()}
+                    {activeView === "email" && renderEmail()}
+                    {activeView === "logs" && renderLogs()}
                 </div>
             </main>
 
