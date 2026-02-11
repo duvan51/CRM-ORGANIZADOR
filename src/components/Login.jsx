@@ -1,12 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../supabase";
 import "../login_premium.css";
 
 const Login = ({ onLoginSuccess }) => {
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
+    const [rememberMe, setRememberMe] = useState(false);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
+
+    // Cargar email recordado al montar
+    useEffect(() => {
+        const savedEmail = localStorage.getItem("rememberedEmail");
+        if (savedEmail) {
+            setUsername(savedEmail);
+            setRememberMe(true);
+        }
+    }, []);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -23,6 +34,13 @@ const Login = ({ onLoginSuccess }) => {
             });
 
             if (error) throw error;
+
+            // Lógica de Recordarme
+            if (rememberMe) {
+                localStorage.setItem("rememberedEmail", cleanEmail);
+            } else {
+                localStorage.removeItem("rememberedEmail");
+            }
 
             const { data: profile, error: profileError } = await supabase
                 .from('profiles')
@@ -70,6 +88,47 @@ const Login = ({ onLoginSuccess }) => {
         }
     };
 
+    const handleForgotPassword = async (e) => {
+        e.preventDefault();
+        const email = prompt("Introduce tu correo electrónico de Superadmin para restablecer la contraseña:");
+        if (!email) return;
+
+        setLoading(true);
+        try {
+            const cleanEmail = email.trim();
+            const isMasterAdmin = cleanEmail.toLowerCase() === "duvanaponteramirez@gmail.com";
+
+            // 1. Verificar si existe un perfil superuser con ese username (o si es el Master Admin)
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('username, role')
+                .eq('username', cleanEmail)
+                .eq('role', 'superuser')
+                .maybeSingle();
+
+            if (profileError) throw profileError;
+
+            if (!profile && !isMasterAdmin) {
+                alert("Acceso denegado. Solo el correo del Súper Administrador está habilitado para recuperación automática.");
+                return;
+            }
+
+            // 2. Si se detectó el perfil superuser o es el Master Admin, enviar correo
+            const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+                redirectTo: window.location.origin + '/#reset-password',
+            });
+
+            if (resetError) throw resetError;
+
+            alert("¡Enlace de recuperación enviado! Revisa tu bandeja de entrada (incluyendo Spam).");
+        } catch (err) {
+            console.error("Error en recuperación:", err);
+            alert("Error al procesar la solicitud: " + (err.message || "Error desconocido"));
+        } finally {
+            setLoading(false);
+        }
+    };
+
     return (
         <div className="login-container">
             <div className="login-card">
@@ -93,13 +152,37 @@ const Login = ({ onLoginSuccess }) => {
 
                     <div className="form-group">
                         <label>Contraseña</label>
-                        <input
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                            placeholder="••••••••"
-                        />
+                        <div className="password-wrapper">
+                            <input
+                                type={showPassword ? "text" : "password"}
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                required
+                                placeholder="••••••••"
+                            />
+                            <button
+                                type="button"
+                                className="toggle-password-btn"
+                                onClick={() => setShowPassword(!showPassword)}
+                                tabIndex="-1"
+                            >
+                                {showPassword ? "👁️‍🗨️" : "👁️"}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="login-options">
+                        <label className="remember-me">
+                            <input
+                                type="checkbox"
+                                checked={rememberMe}
+                                onChange={(e) => setRememberMe(e.target.checked)}
+                            />
+                            Recordar usuario
+                        </label>
+                        <a href="#" className="forgot-password" onClick={handleForgotPassword}>
+                            ¿Olvidaste tu contraseña?
+                        </a>
                     </div>
 
                     {error && <div className="fade-in" style={{ color: "#f87171", fontSize: "0.85rem", textAlign: "center", background: "rgba(239, 68, 68, 0.1)", padding: "10px", borderRadius: "8px" }}>{error}</div>}

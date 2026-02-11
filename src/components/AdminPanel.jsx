@@ -75,6 +75,10 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [editingServiceHour, setEditingServiceHour] = useState(null);
     const [duplicateHorario, setDuplicateHorario] = useState(null);
 
+    // Superconfig (Password change)
+    const [passwordData, setPasswordData] = useState({ newPassword: "", confirmPassword: "" });
+    const [updatingPassword, setUpdatingPassword] = useState(false);
+
     // Confirm Modal State
     const [confirmModal, setConfirmModal] = useState({
         isOpen: false,
@@ -1402,408 +1406,474 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 </div>
             </div>
         );
+        const handleUpdateMyPassword = async (e) => {
+            e.preventDefault();
+            if (passwordData.newPassword !== passwordData.confirmPassword) {
+                return alert("Las contraseñas no coinciden");
+            }
+            if (passwordData.newPassword.length < 6) {
+                return alert("La contraseña debe tener al menos 6 caracteres");
+            }
+
+            setUpdatingPassword(true);
+            try {
+                const { error } = await supabase.auth.updateUser({
+                    password: passwordData.newPassword
+                });
+                if (error) throw error;
+                alert("✅ Contraseña actualizada correctamente.");
+                setPasswordData({ newPassword: "", confirmPassword: "" });
+            } catch (err) {
+                console.error(err);
+                alert("Error al actualizar: " + err.message);
+            } finally {
+                setUpdatingPassword(false);
+            }
+        };
+
+        const renderSuperConfig = () => (
+            <div className="admin-section fade-in">
+                <div className="section-header">
+                    <h3>⚙️ Superconfiguración</h3>
+                    <p className="text-muted">Ajustes de seguridad y perfil personal.</p>
+                </div>
+
+                <div className="premium-card" style={{ maxWidth: '500px', margin: '0 auto' }}>
+                    <h4>🔑 Cambiar mi contraseña</h4>
+                    <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '20px' }}>
+                        Define una nueva clave de acceso para tu cuenta de administrador.
+                    </p>
+                    <form onSubmit={handleUpdateMyPassword} className="premium-form-v">
+                        <div className="form-group">
+                            <label>Nueva Contraseña</label>
+                            <input
+                                type="password"
+                                value={passwordData.newPassword}
+                                onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                                required
+                                placeholder="Mínimo 6 caracteres"
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Confirmar Nueva Contraseña</label>
+                            <input
+                                type="password"
+                                value={passwordData.confirmPassword}
+                                onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                                required
+                                placeholder="Repite la contraseña"
+                            />
+                        </div>
+                        <button type="submit" className="btn-process" disabled={updatingPassword} style={{ marginTop: '10px' }}>
+                            {updatingPassword ? 'Actualizando...' : '💾 Actualizar mi clave'}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
+
+        return (
+            <div className="admin-panel-premium">
+                <div className="admin-sidebar">
+                    <div className="sidebar-logo">
+                        <h2>CRM Admin</h2>
+                        <span>v2.1 Full Access</span>
+                    </div>
+                    <nav>
+                        <button className={activeView === "agendas" ? "active" : ""} onClick={() => setActiveView("agendas")}>📅 Agendas</button>
+                        <button className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}>👥 Personal</button>
+                        <button className={activeView === "bloqueos" ? "active" : ""} onClick={() => setActiveView("bloqueos")}>🚫 Bloqueos</button>
+                        <button className={activeView === "alertas" ? "active" : ""} onClick={() => setActiveView("alertas")}>🔔 Alertas</button>
+                        {(userRole === "superuser" || userRole === "admin" || userRole === "owner") && (
+                            <>
+                                <button className={activeView === "servicios" ? "active" : ""} onClick={() => setActiveView("servicios")}>🛒 Servicios</button>
+                                <button className={activeView === "horarios" ? "active" : ""} onClick={() => setActiveView("horarios")}>🕒 Horarios</button>
+                                {(userRole === "superuser" || userRole === "owner") && (
+                                    <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 SMS Automatizados</button>
+                                )}
+                                {(userRole === "superuser" || userRole === "owner") && (
+                                    <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 Email Automatizados</button>
+                                )}
+                                <button className={activeView === "logs" ? "active" : ""} onClick={() => { setActiveView("logs"); fetchGlobalLogs(); }}>📜 Monitoreo</button>
+                                <button className={activeView === "superconfig" ? "active" : ""} onClick={() => setActiveView("superconfig")}>⚙️ Superconfiguración</button>
+                            </>
+                        )}
+                    </nav>
+                    <button className="btn-back-sidebar" onClick={onBack}>← Volver Agenda</button>
+                </div>
+
+                <main className="admin-content" key={activeView}>
+                    <div className="admin-screen-wrapper">
+                        {activeView === "agendas" && renderAgendas()}
+                        {activeView === "users" && renderUsers()}
+                        {activeView === "bloqueos" && renderBloqueos()}
+                        {activeView === "alertas" && renderAlertas()}
+                        {activeView === "servicios" && renderConfigServicios()}
+                        {activeView === "horarios" && renderConfigHorarios()}
+                        {activeView === "sms" && renderSMS()}
+                        {activeView === "email" && renderEmail()}
+                        {activeView === "logs" && renderLogs()}
+                        {activeView === "superconfig" && renderSuperConfig()}
+                    </div>
+                </main>
+
+                {/* MODAL: MANAGE AGENTS */}
+                {/* Service Hour Modal */}
+                {showServiceHoursModal && (
+                    <div className="modal-overlay">
+                        <div className="modal-content" style={{ maxWidth: "500px" }}>
+                            <h3>Horarios: {showServiceHoursModal.service_name}</h3>
+                            <p className="text-muted">Si no defines ningún horario, el servicio sigue el horario general de la agenda. Si agregas al menos uno, SOLO estará disponible en estos rangos.</p>
+
+                            <form className="premium-form-v" onSubmit={handleAddServiceHour} style={{ marginTop: '15px' }}>
+                                <select name="dia_semana" required defaultValue={editingServiceHour?.dia_semana ?? ""}>
+                                    <option value="" disabled>-- Día --</option>
+                                    {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((d, i) => <option key={i} value={i}>{d}</option>)}
+                                </select>
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    <input name="hora_inicio" type="time" defaultValue={editingServiceHour?.hora_inicio || ""} required />
+                                    <input name="hora_fin" type="time" defaultValue={editingServiceHour?.hora_fin || ""} required />
+                                </div>
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    <button type="submit" className="btn-process" style={{ flex: 2 }}>{editingServiceHour ? "💾 Guardar" : "➕ Añadir Rango"}</button>
+                                    {editingServiceHour && <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={() => setEditingServiceHour(null)}>Cancelar</button>}
+                                </div>
+                            </form>
+
+                            <div className="mini-list" style={{ marginTop: '20px', maxHeight: '300px', overflowY: 'auto' }}>
+                                {serviceHours.length === 0 ? <p className="text-muted text-center">Usa horario general</p> :
+                                    serviceHours.map(h => (
+                                        <div key={h.id} className="mini-item-inline range-badge">
+                                            <div style={{ flex: 1 }}>
+                                                <strong>{["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"][h.dia_semana]}</strong>: {h.hora_inicio} - {h.hora_fin}
+                                            </div>
+                                            <div className="mini-item-actions">
+                                                <button className="btn-edit-tiny" onClick={() => setEditingServiceHour(h)}>✏️</button>
+                                                <button className="btn-delete-tiny" onClick={async () => {
+                                                    const { error } = await supabase.from('horarios_servicios').delete().eq('id', h.id);
+                                                    if (!error) handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
+                                                }}>×</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                            </div>
+
+                            <div className="modal-actions" style={{ marginTop: '20px', borderTop: '1px solid var(--glass-border)', paddingTop: '15px' }}>
+                                <button className="btn-secondary" style={{ width: '100%' }} onClick={() => {
+                                    setShowServiceHoursModal(null);
+                                    setEditingServiceHour(null);
+                                }}>Cerrar</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Existing Modals */}
+                {showAgentModal && (
+                    <div className="modal-overlay">
+                        <div className="modal-content premium-modal">
+                            <h3>Gestionar Agentes: {showAgentModal.name}</h3>
+                            <p>Selecciona los agentes que tienen permiso para ver esta agenda.</p>
+                            <div className="agent-list-scroll">
+                                {users.filter(u => u.role !== 'superuser' && u.role !== 'owner').map(u => {
+                                    const isAssigned = agendas.find(a => a.id === showAgentModal.id)?.users?.some(au => au.id === u.id);
+                                    return (
+                                        <div key={u.id} className="agent-item-row">
+                                            <div className="agent-info">
+                                                <strong>{u.full_name}</strong>
+                                                <span>@{u.username}</span>
+                                            </div>
+                                            <button
+                                                className={isAssigned ? "btn-delete" : "btn-process"}
+                                                onClick={() => toggleAgentAssignment(u.id, showAgentModal.id, isAssigned)}
+                                            >
+                                                {isAssigned ? "Quitar" : "Asignar"}
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn-secondary" onClick={() => setShowAgentModal(null)}>Cerrar</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* MODAL: EDIT/NEW AGENDA */}
+                {showEditAgenda && (
+                    <div className="modal-overlay">
+                        <div className="modal-content premium-modal">
+                            <h3>{showEditAgenda.id === 'new' ? 'Nueva Agenda' : 'Editar Agenda'}</h3>
+                            <form onSubmit={showEditAgenda.id === 'new' ? handleCreateAgenda : handleUpdateAgenda} className="premium-form">
+                                <div className="form-group">
+                                    <label>Nombre de la Agenda</label>
+                                    <input
+                                        type="text"
+                                        value={showEditAgenda.id === 'new' ? newAgenda.name : editingAgenda.name}
+                                        onChange={e => showEditAgenda.id === 'new'
+                                            ? setNewAgenda({ ...newAgenda, name: e.target.value })
+                                            : setEditingAgenda({ ...editingAgenda, name: e.target.value })}
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>Descripción</label>
+                                    <textarea
+                                        value={showEditAgenda.id === 'new' ? newAgenda.description : editingAgenda.description}
+                                        onChange={e => showEditAgenda.id === 'new'
+                                            ? setNewAgenda({ ...newAgenda, description: e.target.value })
+                                            : setEditingAgenda({ ...editingAgenda, description: e.target.value })}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>Cupos Disponibles por Hora</label>
+                                    <input
+                                        type="number"
+                                        value={showEditAgenda.id === 'new' ? newAgenda.slots_per_hour : editingAgenda.slots_per_hour}
+                                        onChange={e => showEditAgenda.id === 'new'
+                                            ? setNewAgenda({ ...newAgenda, slots_per_hour: parseInt(e.target.value) })
+                                            : setEditingAgenda({ ...editingAgenda, slots_per_hour: parseInt(e.target.value) })}
+                                        min="1"
+                                    />
+                                </div>
+                                <div className="modal-footer">
+                                    <button type="button" className="btn-secondary" onClick={() => setShowEditAgenda(null)}>Cancelar</button>
+                                    <button type="submit" className="btn-process">{showEditAgenda.id === 'new' ? 'Crear Agenda' : 'Guardar Cambios'}</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* MODAL: NEW USER */}
+                {showUserModal && (
+                    <div className="modal-overlay">
+                        <div className="modal-content premium-modal">
+                            <h3>Crear Nuevo Usuario</h3>
+                            <form onSubmit={handleCreateUser} className="premium-form">
+                                <div className="form-group">
+                                    <label>Nombre Completo</label>
+                                    <input type="text" value={newUser.full_name} onChange={e => setNewUser({ ...newUser, full_name: e.target.value })} required placeholder="Ej: Juan Pérez" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Nombre de Usuario</label>
+                                    <input type="text" value={newUser.username} onChange={e => setNewUser({ ...newUser, username: e.target.value })} required placeholder="ej: juan_p" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Correo Electrónico</label>
+                                    <input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} required placeholder="ej: admin@correo.com" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Contraseña</label>
+                                    <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} required placeholder="Mínimo 6 caracteres" minLength="6" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Rol del Usuario</label>
+                                    {(userRole === 'superuser' || userRole === 'owner') ? (
+                                        <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })} className="custom-file-input">
+                                            <option value="agent">Agente / Vendedor</option>
+                                            <option value="admin">Administrador (Sede)</option>
+                                            {(userRole === 'owner' || userRole === 'superuser') && <option value="superuser">SuperAdmin (Clínica)</option>}
+                                        </select>
+                                    ) : (
+                                        <div className="role-badge agent" style={{ padding: '10px', display: 'block', textAlign: 'center' }}>
+                                            Rol: Agente (Solo puedes crear agentes)
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="modal-footer">
+                                    <button type="button" className="btn-secondary" onClick={() => setShowUserModal(false)}>Cancelar</button>
+                                    <button type="submit" className="btn-process" disabled={loading}>
+                                        {loading ? "Creando..." : "Crear Usuario"}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* MODAL: DUPLICATE SCHEDULE */}
+                {duplicateHorario && (
+                    <div className="modal-overlay">
+                        <div className="modal-content premium-modal" style={{ maxWidth: '450px' }}>
+                            <h3>Duplicar Horario</h3>
+                            <p style={{ marginBottom: '15px' }}>
+                                Copiando rango <strong>{duplicateHorario.hora_inicio} - {duplicateHorario.hora_fin}</strong>
+                                <br />
+                                <small className="text-muted">De la agenda: {agendas.find(a => a.id === duplicateHorario.agenda_id)?.name}</small>
+                            </p>
+                            <form onSubmit={async (e) => {
+                                e.preventDefault();
+                                setLoading(true);
+                                if (!e.target.target_day.value) return;
+
+                                const targetDay = parseInt(e.target.target_day.value);
+
+                                const { error } = await supabase.from('horarios_atencion').insert({
+                                    agenda_id: duplicateHorario.agenda_id,
+                                    dia_semana: targetDay,
+                                    hora_inicio: duplicateHorario.hora_inicio,
+                                    hora_fin: duplicateHorario.hora_fin
+                                });
+
+                                if (!error) {
+                                    setDuplicateHorario(null);
+                                    fetchData();
+                                } else {
+                                    alert("Error al duplicar: " + error.message);
+                                }
+                                setLoading(false);
+                            }}>
+                                <div className="form-group" style={{ marginBottom: '20px' }}>
+                                    <label>Selecciona el Día Destino</label>
+                                    <select name="target_day" required className="custom-file-input">
+                                        <option value="">-- Seleccionar Día --</option>
+                                        {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((d, i) => (
+                                            <option key={i} value={i} disabled={i === duplicateHorario.dia_semana}>
+                                                {d} {i === duplicateHorario.dia_semana ? '(Origen)' : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="modal-footer">
+                                    <button type="button" className="btn-secondary" onClick={() => setDuplicateHorario(null)}>Cancelar</button>
+                                    <button type="submit" className="btn-process" disabled={loading}>
+                                        {loading ? "Copiando..." : "Duplicar Ahora"}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* MODAL: EDIT/NEW GLOBAL SERVICE */}
+                {showServiceModal && (
+                    <div className="modal-overlay">
+                        <div className="modal-content premium-modal full-screen-modal">
+                            <h3>{showServiceModal.id === 'new' ? 'Nuevo Servicio Global' : `Editar: ${showServiceModal.nombre}`}</h3>
+                            <form onSubmit={handleSaveService} className="premium-form">
+                                <div className="form-group">
+                                    <label>Nombre del Servicio</label>
+                                    <input
+                                        type="text"
+                                        value={editingService.nombre}
+                                        onChange={e => setEditingService({ ...editingService, nombre: e.target.value })}
+                                        required
+                                        placeholder="Ej: Sueroterapia Pack x3"
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>Descripción / Detalles</label>
+                                    <textarea
+                                        value={editingService.descripcion}
+                                        onChange={e => setEditingService({ ...editingService, descripcion: e.target.value })}
+                                        placeholder="Describe los beneficios o el contenido del pack..."
+                                        rows="3"
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                                    <div className="form-group" style={{ flex: 1 }}>
+                                        <label>Precio Base $</label>
+                                        <input
+                                            type="number"
+                                            value={editingService.precio_base}
+                                            onChange={e => setEditingService({ ...editingService, precio_base: e.target.value })}
+                                            required
+                                        />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1 }}>
+                                        <label>Duración (min)</label>
+                                        <input
+                                            type="number"
+                                            value={editingService.duracion_minutos}
+                                            onChange={e => setEditingService({ ...editingService, duracion_minutos: e.target.value })}
+                                            required
+                                        />
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                                    <div className="form-group" style={{ flex: 1 }}>
+                                        <label>Cupos Simultáneos</label>
+                                        <input
+                                            type="number"
+                                            value={editingService.concurrency}
+                                            onChange={e => setEditingService({ ...editingService, concurrency: e.target.value })}
+                                            required
+                                            min="1"
+                                        />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1 }}>
+                                        <label>Total Sesiones (Paquete)</label>
+                                        <input
+                                            type="number"
+                                            value={editingService.total_sesiones}
+                                            onChange={e => setEditingService({ ...editingService, total_sesiones: e.target.value })}
+                                            required
+                                            min="1"
+                                            placeholder="1 para cita única"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="form-group">
+                                    <label>Imagen (Link URL)</label>
+                                    <input
+                                        type="url"
+                                        value={editingService.image_url}
+                                        onChange={e => setEditingService({ ...editingService, image_url: e.target.value })}
+                                        placeholder="https://ejemplo.com/imagen.jpg"
+                                    />
+                                    {editingService.image_url && (
+                                        <div className="img-preview-tiny" style={{ backgroundImage: `url(${editingService.image_url})` }}></div>
+                                    )}
+                                </div>
+                                <div className="form-group">
+                                    <label>Color Distintivo</label>
+                                    <input
+                                        type="color"
+                                        value={editingService.color}
+                                        onChange={e => setEditingService({ ...editingService, color: e.target.value })}
+                                    />
+                                </div>
+
+                                {showServiceModal.id === 'new' && (
+                                    <div className="assign-checkboxes-modal">
+                                        <label>Asignar automáticamente a:</label>
+                                        <div className="checkbox-scroll">
+                                            <label className="checkbox-item">
+                                                <input type="checkbox" name="assign_to" value="-1" />
+                                                <span>⭐ TODAS LAS AGENDAS</span>
+                                            </label>
+                                            {agendas.map(ag => (
+                                                <label key={ag.id} className="checkbox-item">
+                                                    <input type="checkbox" name="assign_to" value={ag.id} />
+                                                    <span>{ag.name}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="modal-footer">
+                                    <button type="button" className="btn-secondary" onClick={() => setShowServiceModal(null)}>Cancelar</button>
+                                    <button type="submit" className="btn-process">{showServiceModal.id === 'new' ? 'Crear Servicio' : 'Guardar Cambios'}</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                <ConfirmModal
+                    isOpen={confirmModal.isOpen}
+                    onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                    onConfirm={confirmModal.onConfirm}
+                    title={confirmModal.title}
+                    message={confirmModal.message}
+                    icon={confirmModal.icon}
+                    type={confirmModal.type}
+                />
+            </div>
+        );
     };
 
-    return (
-        <div className="admin-panel-premium">
-            <div className="admin-sidebar">
-                <div className="sidebar-logo">
-                    <h2>CRM Admin</h2>
-                    <span>v2.1 Full Access</span>
-                </div>
-                <nav>
-                    <button className={activeView === "agendas" ? "active" : ""} onClick={() => setActiveView("agendas")}>📅 Agendas</button>
-                    <button className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}>👥 Personal</button>
-                    <button className={activeView === "bloqueos" ? "active" : ""} onClick={() => setActiveView("bloqueos")}>🚫 Bloqueos</button>
-                    <button className={activeView === "alertas" ? "active" : ""} onClick={() => setActiveView("alertas")}>🔔 Alertas</button>
-                    {(userRole === "superuser" || userRole === "admin" || userRole === "owner") && (
-                        <>
-                            <button className={activeView === "servicios" ? "active" : ""} onClick={() => setActiveView("servicios")}>🛒 Servicios</button>
-                            <button className={activeView === "horarios" ? "active" : ""} onClick={() => setActiveView("horarios")}>🕒 Horarios</button>
-                            {(userRole === "superuser" || userRole === "owner") && (
-                                <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 SMS Automatizados</button>
-                            )}
-                            {(userRole === "superuser" || userRole === "owner") && (
-                                <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 Email Automatizados</button>
-                            )}
-                            <button className={activeView === "logs" ? "active" : ""} onClick={() => { setActiveView("logs"); fetchGlobalLogs(); }}>📜 Monitoreo</button>
-                        </>
-                    )}
-                </nav>
-                <button className="btn-back-sidebar" onClick={onBack}>← Volver Agenda</button>
-            </div>
-
-            <main className="admin-content" key={activeView}>
-                <div className="admin-screen-wrapper">
-                    {activeView === "agendas" && renderAgendas()}
-                    {activeView === "users" && renderUsers()}
-                    {activeView === "bloqueos" && renderBloqueos()}
-                    {activeView === "alertas" && renderAlertas()}
-                    {activeView === "servicios" && renderConfigServicios()}
-                    {activeView === "horarios" && renderConfigHorarios()}
-                    {activeView === "sms" && renderSMS()}
-                    {activeView === "email" && renderEmail()}
-                    {activeView === "logs" && renderLogs()}
-                </div>
-            </main>
-
-            {/* MODAL: MANAGE AGENTS */}
-            {/* Service Hour Modal */}
-            {showServiceHoursModal && (
-                <div className="modal-overlay">
-                    <div className="modal-content" style={{ maxWidth: "500px" }}>
-                        <h3>Horarios: {showServiceHoursModal.service_name}</h3>
-                        <p className="text-muted">Si no defines ningún horario, el servicio sigue el horario general de la agenda. Si agregas al menos uno, SOLO estará disponible en estos rangos.</p>
-
-                        <form className="premium-form-v" onSubmit={handleAddServiceHour} style={{ marginTop: '15px' }}>
-                            <select name="dia_semana" required defaultValue={editingServiceHour?.dia_semana ?? ""}>
-                                <option value="" disabled>-- Día --</option>
-                                {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((d, i) => <option key={i} value={i}>{d}</option>)}
-                            </select>
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                                <input name="hora_inicio" type="time" defaultValue={editingServiceHour?.hora_inicio || ""} required />
-                                <input name="hora_fin" type="time" defaultValue={editingServiceHour?.hora_fin || ""} required />
-                            </div>
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                                <button type="submit" className="btn-process" style={{ flex: 2 }}>{editingServiceHour ? "💾 Guardar" : "➕ Añadir Rango"}</button>
-                                {editingServiceHour && <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={() => setEditingServiceHour(null)}>Cancelar</button>}
-                            </div>
-                        </form>
-
-                        <div className="mini-list" style={{ marginTop: '20px', maxHeight: '300px', overflowY: 'auto' }}>
-                            {serviceHours.length === 0 ? <p className="text-muted text-center">Usa horario general</p> :
-                                serviceHours.map(h => (
-                                    <div key={h.id} className="mini-item-inline range-badge">
-                                        <div style={{ flex: 1 }}>
-                                            <strong>{["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"][h.dia_semana]}</strong>: {h.hora_inicio} - {h.hora_fin}
-                                        </div>
-                                        <div className="mini-item-actions">
-                                            <button className="btn-edit-tiny" onClick={() => setEditingServiceHour(h)}>✏️</button>
-                                            <button className="btn-delete-tiny" onClick={async () => {
-                                                const { error } = await supabase.from('horarios_servicios').delete().eq('id', h.id);
-                                                if (!error) handleFetchServiceHours(showServiceHoursModal.agenda_id, showServiceHoursModal.service_id);
-                                            }}>×</button>
-                                        </div>
-                                    </div>
-                                ))}
-                        </div>
-
-                        <div className="modal-actions" style={{ marginTop: '20px', borderTop: '1px solid var(--glass-border)', paddingTop: '15px' }}>
-                            <button className="btn-secondary" style={{ width: '100%' }} onClick={() => {
-                                setShowServiceHoursModal(null);
-                                setEditingServiceHour(null);
-                            }}>Cerrar</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Existing Modals */}
-            {showAgentModal && (
-                <div className="modal-overlay">
-                    <div className="modal-content premium-modal">
-                        <h3>Gestionar Agentes: {showAgentModal.name}</h3>
-                        <p>Selecciona los agentes que tienen permiso para ver esta agenda.</p>
-                        <div className="agent-list-scroll">
-                            {users.filter(u => u.role !== 'superuser' && u.role !== 'owner').map(u => {
-                                const isAssigned = agendas.find(a => a.id === showAgentModal.id)?.users?.some(au => au.id === u.id);
-                                return (
-                                    <div key={u.id} className="agent-item-row">
-                                        <div className="agent-info">
-                                            <strong>{u.full_name}</strong>
-                                            <span>@{u.username}</span>
-                                        </div>
-                                        <button
-                                            className={isAssigned ? "btn-delete" : "btn-process"}
-                                            onClick={() => toggleAgentAssignment(u.id, showAgentModal.id, isAssigned)}
-                                        >
-                                            {isAssigned ? "Quitar" : "Asignar"}
-                                        </button>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn-secondary" onClick={() => setShowAgentModal(null)}>Cerrar</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* MODAL: EDIT/NEW AGENDA */}
-            {showEditAgenda && (
-                <div className="modal-overlay">
-                    <div className="modal-content premium-modal">
-                        <h3>{showEditAgenda.id === 'new' ? 'Nueva Agenda' : 'Editar Agenda'}</h3>
-                        <form onSubmit={showEditAgenda.id === 'new' ? handleCreateAgenda : handleUpdateAgenda} className="premium-form">
-                            <div className="form-group">
-                                <label>Nombre de la Agenda</label>
-                                <input
-                                    type="text"
-                                    value={showEditAgenda.id === 'new' ? newAgenda.name : editingAgenda.name}
-                                    onChange={e => showEditAgenda.id === 'new'
-                                        ? setNewAgenda({ ...newAgenda, name: e.target.value })
-                                        : setEditingAgenda({ ...editingAgenda, name: e.target.value })}
-                                    required
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label>Descripción</label>
-                                <textarea
-                                    value={showEditAgenda.id === 'new' ? newAgenda.description : editingAgenda.description}
-                                    onChange={e => showEditAgenda.id === 'new'
-                                        ? setNewAgenda({ ...newAgenda, description: e.target.value })
-                                        : setEditingAgenda({ ...editingAgenda, description: e.target.value })}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label>Cupos Disponibles por Hora</label>
-                                <input
-                                    type="number"
-                                    value={showEditAgenda.id === 'new' ? newAgenda.slots_per_hour : editingAgenda.slots_per_hour}
-                                    onChange={e => showEditAgenda.id === 'new'
-                                        ? setNewAgenda({ ...newAgenda, slots_per_hour: parseInt(e.target.value) })
-                                        : setEditingAgenda({ ...editingAgenda, slots_per_hour: parseInt(e.target.value) })}
-                                    min="1"
-                                />
-                            </div>
-                            <div className="modal-footer">
-                                <button type="button" className="btn-secondary" onClick={() => setShowEditAgenda(null)}>Cancelar</button>
-                                <button type="submit" className="btn-process">{showEditAgenda.id === 'new' ? 'Crear Agenda' : 'Guardar Cambios'}</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* MODAL: NEW USER */}
-            {showUserModal && (
-                <div className="modal-overlay">
-                    <div className="modal-content premium-modal">
-                        <h3>Crear Nuevo Usuario</h3>
-                        <form onSubmit={handleCreateUser} className="premium-form">
-                            <div className="form-group">
-                                <label>Nombre Completo</label>
-                                <input type="text" value={newUser.full_name} onChange={e => setNewUser({ ...newUser, full_name: e.target.value })} required placeholder="Ej: Juan Pérez" />
-                            </div>
-                            <div className="form-group">
-                                <label>Nombre de Usuario</label>
-                                <input type="text" value={newUser.username} onChange={e => setNewUser({ ...newUser, username: e.target.value })} required placeholder="ej: juan_p" />
-                            </div>
-                            <div className="form-group">
-                                <label>Correo Electrónico</label>
-                                <input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} required placeholder="ej: admin@correo.com" />
-                            </div>
-                            <div className="form-group">
-                                <label>Contraseña</label>
-                                <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} required placeholder="Mínimo 6 caracteres" minLength="6" />
-                            </div>
-                            <div className="form-group">
-                                <label>Rol del Usuario</label>
-                                {(userRole === 'superuser' || userRole === 'owner') ? (
-                                    <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })} className="custom-file-input">
-                                        <option value="agent">Agente / Vendedor</option>
-                                        <option value="admin">Administrador (Sede)</option>
-                                        {(userRole === 'owner' || userRole === 'superuser') && <option value="superuser">SuperAdmin (Clínica)</option>}
-                                    </select>
-                                ) : (
-                                    <div className="role-badge agent" style={{ padding: '10px', display: 'block', textAlign: 'center' }}>
-                                        Rol: Agente (Solo puedes crear agentes)
-                                    </div>
-                                )}
-                            </div>
-                            <div className="modal-footer">
-                                <button type="button" className="btn-secondary" onClick={() => setShowUserModal(false)}>Cancelar</button>
-                                <button type="submit" className="btn-process" disabled={loading}>
-                                    {loading ? "Creando..." : "Crear Usuario"}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* MODAL: DUPLICATE SCHEDULE */}
-            {duplicateHorario && (
-                <div className="modal-overlay">
-                    <div className="modal-content premium-modal" style={{ maxWidth: '450px' }}>
-                        <h3>Duplicar Horario</h3>
-                        <p style={{ marginBottom: '15px' }}>
-                            Copiando rango <strong>{duplicateHorario.hora_inicio} - {duplicateHorario.hora_fin}</strong>
-                            <br />
-                            <small className="text-muted">De la agenda: {agendas.find(a => a.id === duplicateHorario.agenda_id)?.name}</small>
-                        </p>
-                        <form onSubmit={async (e) => {
-                            e.preventDefault();
-                            setLoading(true);
-                            if (!e.target.target_day.value) return;
-
-                            const targetDay = parseInt(e.target.target_day.value);
-
-                            const { error } = await supabase.from('horarios_atencion').insert({
-                                agenda_id: duplicateHorario.agenda_id,
-                                dia_semana: targetDay,
-                                hora_inicio: duplicateHorario.hora_inicio,
-                                hora_fin: duplicateHorario.hora_fin
-                            });
-
-                            if (!error) {
-                                setDuplicateHorario(null);
-                                fetchData();
-                            } else {
-                                alert("Error al duplicar: " + error.message);
-                            }
-                            setLoading(false);
-                        }}>
-                            <div className="form-group" style={{ marginBottom: '20px' }}>
-                                <label>Selecciona el Día Destino</label>
-                                <select name="target_day" required className="custom-file-input">
-                                    <option value="">-- Seleccionar Día --</option>
-                                    {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((d, i) => (
-                                        <option key={i} value={i} disabled={i === duplicateHorario.dia_semana}>
-                                            {d} {i === duplicateHorario.dia_semana ? '(Origen)' : ''}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="modal-footer">
-                                <button type="button" className="btn-secondary" onClick={() => setDuplicateHorario(null)}>Cancelar</button>
-                                <button type="submit" className="btn-process" disabled={loading}>
-                                    {loading ? "Copiando..." : "Duplicar Ahora"}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* MODAL: EDIT/NEW GLOBAL SERVICE */}
-            {showServiceModal && (
-                <div className="modal-overlay">
-                    <div className="modal-content premium-modal full-screen-modal">
-                        <h3>{showServiceModal.id === 'new' ? 'Nuevo Servicio Global' : `Editar: ${showServiceModal.nombre}`}</h3>
-                        <form onSubmit={handleSaveService} className="premium-form">
-                            <div className="form-group">
-                                <label>Nombre del Servicio</label>
-                                <input
-                                    type="text"
-                                    value={editingService.nombre}
-                                    onChange={e => setEditingService({ ...editingService, nombre: e.target.value })}
-                                    required
-                                    placeholder="Ej: Sueroterapia Pack x3"
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label>Descripción / Detalles</label>
-                                <textarea
-                                    value={editingService.descripcion}
-                                    onChange={e => setEditingService({ ...editingService, descripcion: e.target.value })}
-                                    placeholder="Describe los beneficios o el contenido del pack..."
-                                    rows="3"
-                                />
-                            </div>
-                            <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
-                                <div className="form-group" style={{ flex: 1 }}>
-                                    <label>Precio Base $</label>
-                                    <input
-                                        type="number"
-                                        value={editingService.precio_base}
-                                        onChange={e => setEditingService({ ...editingService, precio_base: e.target.value })}
-                                        required
-                                    />
-                                </div>
-                                <div className="form-group" style={{ flex: 1 }}>
-                                    <label>Duración (min)</label>
-                                    <input
-                                        type="number"
-                                        value={editingService.duracion_minutos}
-                                        onChange={e => setEditingService({ ...editingService, duracion_minutos: e.target.value })}
-                                        required
-                                    />
-                                </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
-                                <div className="form-group" style={{ flex: 1 }}>
-                                    <label>Cupos Simultáneos</label>
-                                    <input
-                                        type="number"
-                                        value={editingService.concurrency}
-                                        onChange={e => setEditingService({ ...editingService, concurrency: e.target.value })}
-                                        required
-                                        min="1"
-                                    />
-                                </div>
-                                <div className="form-group" style={{ flex: 1 }}>
-                                    <label>Total Sesiones (Paquete)</label>
-                                    <input
-                                        type="number"
-                                        value={editingService.total_sesiones}
-                                        onChange={e => setEditingService({ ...editingService, total_sesiones: e.target.value })}
-                                        required
-                                        min="1"
-                                        placeholder="1 para cita única"
-                                    />
-                                </div>
-                            </div>
-                            <div className="form-group">
-                                <label>Imagen (Link URL)</label>
-                                <input
-                                    type="url"
-                                    value={editingService.image_url}
-                                    onChange={e => setEditingService({ ...editingService, image_url: e.target.value })}
-                                    placeholder="https://ejemplo.com/imagen.jpg"
-                                />
-                                {editingService.image_url && (
-                                    <div className="img-preview-tiny" style={{ backgroundImage: `url(${editingService.image_url})` }}></div>
-                                )}
-                            </div>
-                            <div className="form-group">
-                                <label>Color Distintivo</label>
-                                <input
-                                    type="color"
-                                    value={editingService.color}
-                                    onChange={e => setEditingService({ ...editingService, color: e.target.value })}
-                                />
-                            </div>
-
-                            {showServiceModal.id === 'new' && (
-                                <div className="assign-checkboxes-modal">
-                                    <label>Asignar automáticamente a:</label>
-                                    <div className="checkbox-scroll">
-                                        <label className="checkbox-item">
-                                            <input type="checkbox" name="assign_to" value="-1" />
-                                            <span>⭐ TODAS LAS AGENDAS</span>
-                                        </label>
-                                        {agendas.map(ag => (
-                                            <label key={ag.id} className="checkbox-item">
-                                                <input type="checkbox" name="assign_to" value={ag.id} />
-                                                <span>{ag.name}</span>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="modal-footer">
-                                <button type="button" className="btn-secondary" onClick={() => setShowServiceModal(null)}>Cancelar</button>
-                                <button type="submit" className="btn-process">{showServiceModal.id === 'new' ? 'Crear Servicio' : 'Guardar Cambios'}</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            <ConfirmModal
-                isOpen={confirmModal.isOpen}
-                onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
-                onConfirm={confirmModal.onConfirm}
-                title={confirmModal.title}
-                message={confirmModal.message}
-                icon={confirmModal.icon}
-                type={confirmModal.type}
-            />
-        </div>
-    );
-};
-
-export default AdminPanel;
+    export default AdminPanel;

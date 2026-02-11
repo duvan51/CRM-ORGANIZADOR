@@ -12,9 +12,9 @@ import SalesCounter from "./components/SalesCounter.jsx";
 import AgentDashboard from "./components/AgentDashboard.jsx";
 import useWebSocket from "./hooks/useWebSocket.js";
 import PatientTracking from "./components/PatientTracking.jsx";
-import MasterPanel from "./components/MasterPanel.jsx";
 import SubscriptionManager from "./components/SubscriptionManager.jsx";
 import QuickScheduleModal from "./components/QuickScheduleModal.jsx";
+import ResetPasswordForm from "./components/ResetPasswordForm.jsx";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div className="field-manager-container">
     <h4 className="field-manager-title">Columnas a unificar:</h4>
@@ -71,6 +71,7 @@ function App() {
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
   const [pendingConfirmations, setPendingConfirmations] = useState(0); // For the bell
   const [pendingReschedule, setPendingReschedule] = useState(null);
+  const [isResetting, setIsResetting] = useState(window.location.hash === "#reset-password");
 
   useEffect(() => {
     const checkPending = async () => {
@@ -213,13 +214,15 @@ function App() {
     fetchUserProfile();
     checkPendingConfirmations();
 
-    // Listen for auth state changes (Social Login / Logout)
+    // Listen for auth state changes (Social Login / Logout / Recovery)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log("Auth Event:", event);
       if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         fetchUserProfile();
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
+      } else if (event === 'PASSWORD_RECOVERY') {
+        setIsResetting(true);
       }
     });
 
@@ -393,6 +396,8 @@ function App() {
     const targetAgenda = user.agendas.find(a => a.id === cita.agenda_id) || activeAgenda || user.agendas[0];
     setActiveAgenda(targetAgenda);
   };
+
+  if (isResetting) return <ResetPasswordForm onComplete={() => setIsResetting(false)} />;
 
   if (!user) return <Login onLoginSuccess={(userData) => {
     setUser(userData);
