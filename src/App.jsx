@@ -486,7 +486,10 @@ function App() {
     <div className="container">
       <header className="header">
         <div className="header-top">
-          <h1>CRM Organizador</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <img src="/andocrm.svg" alt="AndoCRM Logo" style={{ width: '32px', height: '32px' }} />
+            <h1 style={{ margin: 0 }}>AndoCRM</h1>
+          </div>
           <div className="header-controls">
             {activeTab === "agenda" && <div className="hide-mobile"><SalesCounter user={user} /></div>}
 

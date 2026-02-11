@@ -74,8 +74,9 @@ const Login = ({ onLoginSuccess }) => {
         <div className="login-container">
             <div className="login-card">
                 <div className="login-brand">
-                    <h1>CRM Admin</h1>
-                    <p>Acceso Profesional</p>
+                    <img src="/andocrm.svg" alt="AndoCRM Logo" style={{ width: '80px', height: '80px', marginBottom: '15px' }} />
+                    <h1>AndoCRM</h1>
+                    <p>Gestión Inteligente</p>
                 </div>
 
                 <form className="login-form" onSubmit={handleSubmit}>
