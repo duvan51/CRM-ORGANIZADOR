@@ -16,6 +16,7 @@ export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agen
     const [bookedSlots, setBookedSlots] = useState([]);
     const [vendedores, setVendedores] = useState([]);
     const [patientSuggestions, setPatientSuggestions] = useState([]);
+    const [metaCampaigns, setMetaCampaigns] = useState([]);
 
 
     const [formData, setFormData] = useState(initialData || {
@@ -38,20 +39,25 @@ export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agen
         vendedor: currentUserName || "",
         otros: "",
         sesion_nro: 1,
-        total_sesiones: 1
+        total_sesiones: 1,
+        utm_source: "",
+        utm_campaign: "",
+        utm_medium: ""
     });
 
 
     useEffect(() => {
         const fetchConfig = async () => {
             try {
-                const [sRes, hRes, bRes, hsRes, cRes, vRes] = await Promise.all([
+                const [sRes, hRes, bRes, hsRes, cRes, vRes, mRes, pRes] = await Promise.all([
                     supabase.from('agenda_services').select('*, service:global_services(*)').eq('agenda_id', agendaId),
                     supabase.from('horarios_atencion').select('*').eq('agenda_id', agendaId),
                     supabase.from('bloqueos').select('*').eq('agenda_id', agendaId),
                     supabase.from('horarios_servicios').select('*').eq('agenda_id', agendaId),
                     supabase.from('citas').select('*').eq('agenda_id', agendaId).eq('fecha', selectedDate.toISOString().split('T')[0]),
-                    supabase.from('profiles').select('full_name, username').eq('is_active', true)
+                    supabase.from('profiles').select('full_name, username').eq('is_active', true),
+                    supabase.from('meta_ads_agenda_mapping').select('*').eq('agenda_id', agendaId),
+                    supabase.from('meta_ads_performance').select('campaign_id, campaign_name')
                 ]);
 
                 setConfigServicios(sRes.data || []);
@@ -60,6 +66,21 @@ export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agen
                 setHorariosServicios(hsRes.data || []);
                 setCitasDelDia(cRes.data || []);
                 setVendedores(vRes.data || []);
+
+                // Join mappings with performance data manually
+                if (mRes.data && pRes.data) {
+                    const uniqueCamps = [];
+                    const seenIds = new Set();
+                    const mappedIds = mRes.data.map(m => m.meta_entity_id);
+
+                    pRes.data.forEach(p => {
+                        if (mappedIds.includes(p.campaign_id) && !seenIds.has(p.campaign_id)) {
+                            seenIds.add(p.campaign_id);
+                            uniqueCamps.push({ id: p.campaign_id, name: p.campaign_name });
+                        }
+                    });
+                    setMetaCampaigns(uniqueCamps);
+                }
             } catch (e) { console.error(e); }
         };
         fetchConfig();
@@ -692,6 +713,52 @@ export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agen
                         <label>Factura #</label>
                         <input type="text" name="factura" value={formData.factura} onChange={handleChange} />
                     </div>
+                    <div style={{ gridColumn: "span 2", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", padding: '15px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', marginTop: '10px' }}>
+                        <div className="form-group">
+                            <label style={{ fontSize: '0.7rem', color: 'var(--primary)', marginBottom: '5px' }}>UTM Source</label>
+                            <input type="text" name="utm_source" value={formData.utm_source} onChange={handleChange} placeholder="facebook / google / etc" style={{ fontSize: '0.8rem' }} />
+                        </div>
+                        <div className="form-group">
+                            <label style={{ fontSize: '0.7rem', color: 'var(--primary)', marginBottom: '5px' }}>UTM Campaign</label>
+                            <input type="text" name="utm_campaign" value={formData.utm_campaign} onChange={handleChange} placeholder="campaña_promo" style={{ fontSize: '0.8rem' }} />
+                        </div>
+                        <div className="form-group">
+                            <label style={{ fontSize: '0.7rem', color: 'var(--primary)', marginBottom: '5px' }}>UTM Medium</label>
+                            <input type="text" name="utm_medium" value={formData.utm_medium} onChange={handleChange} placeholder="cpc / social / lead" style={{ fontSize: '0.8rem' }} />
+                        </div>
+                        <div className="form-group" style={{ gridColumn: "span 3" }}>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--primary)', marginBottom: '5px' }}>Origen / Campaña Meta Ads</label>
+                            <select
+                                name="meta_ad_id"
+                                value={formData.meta_ad_id || ""}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    const camp = metaCampaigns.find(c => c.id === val);
+                                    setFormData(prev => ({
+                                        ...prev,
+                                        meta_ad_id: val,
+                                        utm_source: val ? 'facebook' : prev.utm_source,
+                                        utm_campaign: camp ? camp.name : prev.utm_campaign
+                                    }));
+                                }}
+                                style={{ fontSize: '0.8rem' }}
+                                className="custom-file-input"
+                            >
+                                <option value="">-- Sin Campaña Específica --</option>
+                                {metaCampaigns.map(c => (
+                                    <option key={c.id} value={c.id}>📢 {c.name}</option>
+                                ))}
+                                <option value="manual">➕ Otro (Ingresar Manual)</option>
+                            </select>
+                        </div>
+                        {formData.meta_ad_id === 'manual' && (
+                            <div className="form-group" style={{ gridColumn: "span 3" }}>
+                                <label style={{ fontSize: '0.7rem', color: 'var(--primary)', marginBottom: '5px' }}>ID de Campaña Manual</label>
+                                <input type="text" name="meta_ad_id_manual" placeholder="Pega el ID aquí" onChange={(e) => setFormData(prev => ({ ...prev, meta_ad_id: e.target.value }))} style={{ fontSize: '0.8rem' }} />
+                            </div>
+                        )}
+                    </div>
+
                     <div className="form-group" style={{ gridColumn: "span 2" }}>
                         <label>Observaciones</label>
                         <textarea name="observaciones" value={formData.observaciones} onChange={handleChange} rows="2"></textarea>

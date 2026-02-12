@@ -17,6 +17,15 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [agendaOffers, setAgendaOffers] = useState([]);
     const [selectedAgendaForHours, setSelectedAgendaForHours] = useState(null);
     const [allAgendaServices, setAllAgendaServices] = useState([]);
+    const [authUser, setAuthUser] = useState(null);
+    const [clinicId, setClinicId] = useState(null);
+
+    // Meta Ads States
+    const [metaConfig, setMetaConfig] = useState({ access_token: '', business_id: '', is_active: true });
+    const [savingMeta, setSavingMeta] = useState(false);
+    const [metaAccounts, setMetaAccounts] = useState([]);
+    const [metaMappings, setMetaMappings] = useState([]);
+    const [metaCampaigns, setMetaCampaigns] = useState([]);
 
     // SMS Automation States
     const [infobipConfig, setInfobipConfig] = useState({ api_key: "", base_url: "", sender_id: "CRM_SMS", is_active: true });
@@ -104,9 +113,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
+            setAuthUser(user);
 
             const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user.id).single();
             const currentClinicId = profile?.clinic_id || user.id;
+            setClinicId(currentClinicId);
 
             // --- CARGAR AGENDAS ---
             const { data: agRes } = await supabase.from('agendas').select('*, users:profiles(*)').eq('clinic_id', currentClinicId);
@@ -1297,6 +1308,228 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         </div>
     );
 
+    useEffect(() => {
+        const fetchMeta = async () => {
+            if (!clinicId) return;
+            // Config
+            const { data: cfg } = await supabase.from('meta_ads_config').select('*').eq('clinic_id', clinicId).maybeSingle();
+            if (cfg) setMetaConfig(cfg);
+
+            // Fetch Linked Accounts
+            const { data: accounts } = await supabase.from('meta_ads_accounts').select('*').eq('clinic_id', clinicId);
+            setMetaAccounts(accounts || []);
+
+            // Fetch campaigns from performance cache (grouped by account if possible)
+            const { data: camps } = await supabase.from('meta_ads_performance').select('campaign_id, campaign_name, ad_account_id').eq('clinic_id', clinicId);
+            const uniqueCamps = Array.from(new Map(camps?.map(item => [item.campaign_id, item])).values());
+            setMetaCampaigns(uniqueCamps);
+
+            // Fetch current mappings
+            const { data: maps } = await supabase.from('meta_ads_agenda_mapping').select('*').eq('clinic_id', clinicId);
+            setMetaMappings(maps || []);
+        };
+        fetchMeta();
+    }, [clinicId]);
+
+    const handleSaveMeta = async (e) => {
+        e.preventDefault();
+        setSavingMeta(true);
+        try {
+            const { error } = await supabase.from('meta_ads_config').upsert({
+                clinic_id: clinicId,
+                access_token: metaConfig.access_token,
+                business_id: metaConfig.business_id,
+                is_active: metaConfig.is_active
+            }, { onConflict: 'clinic_id' });
+            if (error) throw error;
+            alert("Configuración de Portafolio guardada.");
+        } catch (err) {
+            alert("Error: " + err.message);
+        } finally {
+            setSavingMeta(false);
+        }
+    };
+
+    const toggleAccountSync = async (accountId, currentStatus) => {
+        const { error } = await supabase.from('meta_ads_accounts').update({ is_sync_enabled: !currentStatus }).eq('id', accountId);
+        if (!error) {
+            setMetaAccounts(metaAccounts.map(acc => acc.id === accountId ? { ...acc, is_sync_enabled: !currentStatus } : acc));
+        }
+    };
+
+    const discoverAccounts = async () => {
+        if (!metaConfig.access_token) {
+            alert("Por favor, ingresa el Token de Acceso y guarda el portafolio antes de descubrir cuentas.");
+            return;
+        }
+        setSavingMeta(true);
+        try {
+            const { data, error } = await supabase.functions.invoke('sync-meta-ads', {
+                body: { action: 'discover-accounts' }
+            });
+
+            if (error) {
+                // If invoke returns an error object, try to see if it has a message in the body
+                const errorDetails = await error.context?.json?.();
+                throw new Error(errorDetails?.error || error.message);
+            }
+
+            alert(`¡Éxito! Se encontraron ${data.count} cuentas publicitarias.`);
+            fetchData(); // Refresh UI
+        } catch (err) {
+            alert("Error al descubrir cuentas: " + err.message);
+        } finally {
+            setSavingMeta(false);
+        }
+    };
+
+    const syncPerformance = async () => {
+        setSavingMeta(true);
+        try {
+            const { data, error } = await supabase.functions.invoke('sync-meta-ads', {
+                body: { action: 'sync-performance' }
+            });
+            if (error) throw error;
+            alert(`Sincronización completada. ${data.synced_campaigns} campañas actualizadas.`);
+            fetchData(); // Refresh mappings and performance
+        } catch (err) {
+            alert("Error en sincronización: " + err.message);
+        } finally {
+            setSavingMeta(false);
+        }
+    };
+
+    const toggleMapping = async (campaignId, agendaId) => {
+        const exists = metaMappings.find(m => m.meta_entity_id === campaignId && m.agenda_id === agendaId);
+        if (exists) {
+            const { error } = await supabase.from('meta_ads_agenda_mapping').delete().eq('id', exists.id);
+            if (!error) setMetaMappings(metaMappings.filter(m => m.id !== exists.id));
+        } else {
+            const { data, error } = await supabase.from('meta_ads_agenda_mapping').insert({
+                clinic_id: clinicId,
+                meta_entity_id: campaignId,
+                meta_entity_type: 'campaign',
+                agenda_id: agendaId
+            }).select().single();
+            if (!error) setMetaMappings([...metaMappings, data]);
+        }
+    };
+
+    const renderMetaConfig = () => (
+        <div className="admin-section fade-in">
+            <div className="section-header">
+                <h3>📱 Gestión Profesional de Meta Ads (Portafolio)</h3>
+                <p className="text-muted">Conecta tu Portafolio de Negocios para gestionar múltiples cuentas y campañas.</p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+                    <div className="card" style={{ padding: '25px' }}>
+                        <h4 style={{ marginBottom: '20px' }}>🔑 Configuración de Portafolio</h4>
+                        <form onSubmit={handleSaveMeta} className="premium-form-v">
+                            <div className="form-group">
+                                <label>Token de Acceso (Usuario del Sistema)</label>
+                                <input type="password" value={metaConfig.access_token} onChange={e => setMetaConfig({ ...metaConfig, access_token: e.target.value })} placeholder="EAA..." required />
+                            </div>
+                            <div className="form-group">
+                                <label>ID de Portafolio / Negocio (Opcional)</label>
+                                <input type="text" value={metaConfig.business_id} onChange={e => setMetaConfig({ ...metaConfig, business_id: e.target.value })} placeholder="1234567890..." />
+                            </div>
+                            <button type="submit" className="btn-process" disabled={savingMeta}>
+                                {savingMeta ? "Guardando..." : "💾 Guardar Portafolio"}
+                            </button>
+                        </form>
+                    </div>
+
+                    <div className="card" style={{ padding: '25px' }}>
+                        <h4 style={{ marginBottom: '20px' }}>💳 Cuentas Publicitarias Vinculadas</h4>
+                        <div className="accounts-list" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                            {metaAccounts.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '20px' }}>
+                                    <p className="text-muted">No hay cuentas vinculadas.</p>
+                                    <button className="btn-secondary" style={{ marginTop: '10px' }} onClick={discoverAccounts}>🔍 Descubrir Cuentas</button>
+                                </div>
+                            ) : (
+                                metaAccounts.map(acc => (
+                                    <div key={acc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', borderBottom: '1px solid var(--glass-border)' }}>
+                                        <div>
+                                            <strong style={{ fontSize: '0.9rem' }}>{acc.name || acc.ad_account_id}</strong>
+                                            <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>{acc.ad_account_id}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <span style={{ fontSize: '0.7rem' }}>{acc.is_sync_enabled ? 'Sincronizando' : 'Pausado'}</span>
+                                            <input
+                                                type="checkbox"
+                                                checked={acc.is_sync_enabled}
+                                                onChange={() => toggleAccountSync(acc.id, acc.is_sync_enabled)}
+                                            />
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="card" style={{ padding: '25px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <h4 style={{ margin: 0 }}>🎯 Mapeo Unificado de Campañas</h4>
+                        <button
+                            type="button"
+                            className="btn-process"
+                            style={{ padding: '8px 15px', fontSize: '0.8rem' }}
+                            onClick={syncPerformance}
+                            disabled={savingMeta}
+                        >
+                            {savingMeta ? "Sincronizando..." : "🔄 Sincronizar Campañas"}
+                        </button>
+                    </div>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                        Asigna campañas de tus cuentas activas a agendas específicas.
+                    </p>
+                    <div className="mapping-container" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+                        {metaCampaigns.length === 0 ? (
+                            <p className="text-muted text-center">No se detectaron campañas aún. Sincroniza primero.</p>
+                        ) : (
+                            metaCampaigns.map(camp => (
+                                <div key={camp.campaign_id} style={{ marginBottom: '20px', padding: '15px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                                        <strong style={{ display: 'block' }}>📢 {camp.campaign_name}</strong>
+                                        <span style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px' }}>
+                                            {metaAccounts.find(a => a.ad_account_id === camp.ad_account_id)?.name || camp.ad_account_id}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                        {agendas.map(ag => {
+                                            const isMapped = metaMappings.some(m => m.meta_entity_id === camp.campaign_id && m.agenda_id === ag.id);
+                                            return (
+                                                <button
+                                                    key={ag.id}
+                                                    onClick={() => toggleMapping(camp.campaign_id, ag.id)}
+                                                    style={{
+                                                        padding: '4px 10px',
+                                                        fontSize: '0.75rem',
+                                                        borderRadius: '20px',
+                                                        border: '1px solid var(--glass-border)',
+                                                        background: isMapped ? 'var(--primary)' : 'transparent',
+                                                        color: isMapped ? 'white' : 'var(--text-muted)',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    {ag.name}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
     const renderLogs = () => {
         if (loadingLogs) return <div style={{ textAlign: 'center', padding: '50px' }}>Cargando registros de envío...</div>;
 
@@ -1491,10 +1724,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             <button className={activeView === "servicios" ? "active" : ""} onClick={() => setActiveView("servicios")}>🛒 Servicios</button>
                             <button className={activeView === "horarios" ? "active" : ""} onClick={() => setActiveView("horarios")}>🕒 Horarios</button>
                             {(userRole === "superuser" || userRole === "owner") && (
-                                <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 SMS Automatizados</button>
-                            )}
-                            {(userRole === "superuser" || userRole === "owner") && (
-                                <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 Email Automatizados</button>
+                                <>
+                                    <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 SMS Automatizados</button>
+                                    <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 Email Automatizados</button>
+                                    <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 Meta Ads</button>
+                                </>
                             )}
                             <button className={activeView === "logs" ? "active" : ""} onClick={() => { setActiveView("logs"); fetchGlobalLogs(); }}>📜 Monitoreo</button>
                             <button className={activeView === "superconfig" ? "active" : ""} onClick={() => setActiveView("superconfig")}>⚙️ Superconfiguración</button>
@@ -1514,6 +1748,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "horarios" && renderConfigHorarios()}
                     {activeView === "sms" && renderSMS()}
                     {activeView === "email" && renderEmail()}
+                    {activeView === "meta" && renderMetaConfig()}
                     {activeView === "logs" && renderLogs()}
                     {activeView === "superconfig" && renderSuperConfig()}
                 </div>
