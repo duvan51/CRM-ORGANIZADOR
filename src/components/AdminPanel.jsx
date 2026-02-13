@@ -28,6 +28,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [metaCampaigns, setMetaCampaigns] = useState([]);
     const [expandedCampaigns, setExpandedCampaigns] = useState(new Set());
     const [showMetaGuide, setShowMetaGuide] = useState(false);
+    const [metaStatusFilter, setMetaStatusFilter] = useState("ALL");
+    const [metaStartDate, setMetaStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+    const [metaEndDate, setMetaEndDate] = useState(new Date().toISOString().split('T')[0]);
+    const [metaAccountFilter, setMetaAccountFilter] = useState("ALL"); // "ALL" o array de ad_account_id
+    const [isMultiSelectOpen, setIsMultiSelectOpen] = useState(false);
 
     // SMS Automation States
     const [infobipConfig, setInfobipConfig] = useState({ api_key: "", base_url: "", sender_id: "CRM_SMS", is_active: true });
@@ -103,6 +108,10 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     useEffect(() => {
         fetchData();
     }, []);
+
+    useEffect(() => {
+        if (clinicId) fetchMetaData();
+    }, [metaStartDate, metaEndDate, clinicId]);
 
     const fetchAgendaOffers = async (agenda) => {
         if (!agenda) return;
@@ -187,38 +196,57 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 });
             }
 
-            // --- CARGAR CONFIG META ADS ---
-            const { data: mConfig } = await supabase.from('meta_ads_config').select('*').eq('clinic_id', currentClinicId).maybeSingle();
-            if (mConfig) setMetaConfig(mConfig);
-
-            const { data: mAccounts } = await supabase.from('meta_ads_accounts').select('*').eq('clinic_id', currentClinicId);
-            setMetaAccounts(mAccounts || []);
-
-            const { data: mMappings } = await supabase.from('meta_ads_agenda_mapping').select('*').eq('clinic_id', currentClinicId);
-            setMetaMappings(mMappings || []);
-
-            const { data: mCampaigns } = await supabase.from('meta_ads_performance')
-                .select('*')
-                .eq('clinic_id', currentClinicId)
-                .order('date', { ascending: false });
-
-            // Deduplicar para mostrar solo el registro más reciente de cada entidad
-            const uniqueEntities = [];
-            const seenIds = new Set();
-            if (mCampaigns) {
-                mCampaigns.forEach(c => {
-                    const key = `${c.campaign_id}_${c.entity_type}`;
-                    if (!seenIds.has(key)) {
-                        seenIds.add(key);
-                        uniqueEntities.push(c);
-                    }
-                });
-            }
-            setMetaCampaigns(uniqueEntities);
+            await fetchMetaData(currentClinicId);
         } catch (error) {
             console.error("Error fetching data:", error);
         }
         setLoading(false);
+    };
+
+    const fetchMetaData = async (cid = null) => {
+        const targetClinicId = cid || clinicId;
+        if (!targetClinicId) return;
+
+        try {
+            const { data: mConfig } = await supabase.from('meta_ads_config').select('*').eq('clinic_id', targetClinicId).maybeSingle();
+            if (mConfig) setMetaConfig(mConfig);
+
+            const { data: mAccounts } = await supabase.from('meta_ads_accounts').select('*').eq('clinic_id', targetClinicId);
+            setMetaAccounts(mAccounts || []);
+
+            const { data: mMappings } = await supabase.from('meta_ads_agenda_mapping').select('*').eq('clinic_id', targetClinicId);
+            setMetaMappings(mMappings || []);
+
+            const { data: mCampaigns } = await supabase.from('meta_ads_performance')
+                .select('*')
+                .eq('clinic_id', targetClinicId)
+                .gte('date', metaStartDate)
+                .lte('date', metaEndDate)
+                .order('date', { ascending: false });
+
+            const entityMetrics = {};
+            if (mCampaigns) {
+                mCampaigns.forEach(row => {
+                    const key = `${row.campaign_id}_${row.entity_type}`;
+                    if (!entityMetrics[key]) {
+                        entityMetrics[key] = { ...row, spend: 0, impressions: 0, clicks: 0, conversations_count: 0 };
+                    }
+                    entityMetrics[key].spend += parseFloat(row.spend || 0);
+                    entityMetrics[key].impressions += (row.impressions || 0);
+                    entityMetrics[key].clicks += (row.clicks || 0);
+                    entityMetrics[key].conversations_count += (row.conversations_count || 0);
+
+                    if (row.date >= (entityMetrics[key].last_date || '')) {
+                        entityMetrics[key].status = row.status;
+                        entityMetrics[key].campaign_name = row.campaign_name;
+                        entityMetrics[key].last_date = row.date;
+                    }
+                });
+            }
+            setMetaCampaigns(Object.values(entityMetrics));
+        } catch (error) {
+            console.error("Error fetching meta data:", error);
+        }
     };
 
     const fetchGlobalLogs = async () => {
@@ -315,19 +343,33 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const handleCreateAgenda = async (e) => {
         e.preventDefault();
 
-        // Get clinic_id
-        const { data: { user } } = await supabase.auth.getUser();
-        const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user.id).single();
-        const currentClinicId = profile?.clinic_id;
+        try {
+            // Get clinic_id
+            const { data: { user } } = await supabase.auth.getUser();
+            const { data: profile } = await supabase.from('profiles').select('clinic_id').eq('id', user.id).single();
+            const currentClinicId = profile?.clinic_id;
 
-        const { error } = await supabase.from('agendas').insert({
-            ...newAgenda,
-            clinic_id: currentClinicId
-        });
-        if (!error) {
+            const { error } = await supabase.from('agendas').insert({
+                ...newAgenda,
+                clinic_id: currentClinicId
+            });
+
+            if (error) {
+                if (error.code === '23505') {
+                    alert("Ya tienes una agenda llamada '" + newAgenda.name + "'. Por favor usa un nombre diferente.");
+                } else {
+                    alert("Error al crear agenda: " + error.message);
+                }
+                return;
+            }
+
+            alert("Agenda creada con éxito");
             setNewAgenda({ name: "", description: "", slots_per_hour: 1 });
             setShowEditAgenda(null);
             fetchData();
+        } catch (err) {
+            console.error("Error creating agenda:", err);
+            alert("Error crítico: " + err.message);
         }
     };
 
@@ -1401,7 +1443,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             if (!session) throw new Error("No hay sesión activa. Por favor, logueate de nuevo.");
 
             const { data, error } = await supabase.functions.invoke('sync-meta-ads', {
-                body: { action: 'sync-performance' }
+                body: {
+                    action: 'sync-performance',
+                    startDate: metaStartDate,
+                    endDate: metaEndDate
+                }
             });
 
             if (error) {
@@ -1409,12 +1455,22 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 throw new Error(errorDetails?.error || error.message);
             }
 
-            if (data.message) {
+            if (!data) {
+                alert("Error: La sincronización no devolvió datos.");
+            } else if (data.message) {
                 alert(data.message);
+            } else if (data.synced_rows !== undefined) {
+                // Formatear diagnósticos de forma amigable
+                const diagnosText = data.diagnostics?.map(d =>
+                    `- ${d.account}: ${d.status === 'OK' ? `Sincronizado (${d.records} filas)` : `Error: ${d.error}`}`
+                ).join('\n') || 'Sin detalles';
+
+                alert(`¡Éxito! Sincronización v5.5 Completa.\n\nPeriodo: ${data.range}\nTotal: ${data.synced_rows} registros.\n\nDetalles por cuenta:\n${diagnosText}`);
             } else {
-                alert(`¡Éxito! Sincronización completada. ${data.synced_campaigns} campañas actualizadas.`);
+                alert("Atención: Respuesta inesperada del servidor (v5.5). Respuesta cruda: " + JSON.stringify(data));
             }
-            fetchData(); // Refresh mappings and performance
+            // Forzamos recarga profunda de metadatos
+            await fetchMetaData();
         } catch (err) {
             alert("Error en sincronización: " + err.message);
         } finally {
@@ -1438,191 +1494,357 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
     };
 
-    const renderMetaConfig = () => (
-        <div className="admin-section fade-in">
-            <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                    <h3>📱 Gestión Profesional de Meta Ads (Portafolio)</h3>
-                    <p className="text-muted">Conecta tu Portafolio de Negocios para gestionar múltiples cuentas y campañas.</p>
-                </div>
-                <button
-                    className="btn-secondary"
-                    onClick={() => setShowMetaGuide(true)}
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 15px', background: 'rgba(var(--primary-rgb), 0.1)', border: '1px solid var(--primary)' }}
-                >
-                    📖 Guía de Configuración
-                </button>
-            </div>
+    const formatCOP = (val) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Math.round(val));
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-                    <div className="card" style={{ padding: '25px' }}>
-                        <h4 style={{ marginBottom: '20px' }}>🔑 Configuración de Portafolio</h4>
-                        <form onSubmit={handleSaveMeta} className="premium-form-v">
-                            <div className="form-group">
-                                <label>Token de Acceso (Usuario del Sistema)</label>
-                                <input type="password" value={metaConfig.access_token} onChange={e => setMetaConfig({ ...metaConfig, access_token: e.target.value })} placeholder="EAA..." required />
-                            </div>
-                            <div className="form-group">
-                                <label>ID de Portafolio / Negocio (Opcional)</label>
-                                <input type="text" value={metaConfig.business_id} onChange={e => setMetaConfig({ ...metaConfig, business_id: e.target.value })} placeholder="1234567890..." />
-                            </div>
-                            <button type="submit" className="btn-process" disabled={savingMeta}>
-                                {savingMeta ? "Guardando..." : "💾 Guardar Portafolio"}
-                            </button>
-                        </form>
+    const renderMetaConfig = () => {
+        // Calcular Totales Filtrados
+        const filteredCampaigns = metaCampaigns.filter(c =>
+            c.entity_type === 'campaign' &&
+            (metaStatusFilter === 'ALL' || c.status === metaStatusFilter) &&
+            (metaAccountFilter === 'ALL' || (Array.isArray(metaAccountFilter) && metaAccountFilter.includes(c.ad_account_id)))
+        );
+
+        const totals = filteredCampaigns.reduce((acc, c) => ({
+            spend: acc.spend + parseFloat(c.spend || 0),
+            impressions: acc.impressions + parseInt(c.impressions || 0),
+            clicks: acc.clicks + parseInt(c.clicks || 0),
+            conversations: acc.conversations + parseInt(c.conversations_count || 0)
+        }), { spend: 0, impressions: 0, clicks: 0, conversations: 0 });
+
+        const cpa = totals.conversations > 0 ? (totals.spend / totals.conversations) : 0;
+
+        return (
+            <div className="admin-section fade-in">
+                <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                        <h3>📱 Meta Ads Intelligence</h3>
+                        <p className="text-muted">Análisis de rendimiento y mapeo estratégico de campañas para agendas.</p>
                     </div>
+                    <button
+                        className="btn-secondary"
+                        onClick={() => setShowMetaGuide(true)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 15px', background: 'rgba(var(--primary-rgb), 0.1)', border: '1px solid var(--primary)' }}
+                    >
+                        📖 Guía Setup
+                    </button>
+                </div>
 
-                    <div className="card" style={{ padding: '25px' }}>
-                        <h4 style={{ marginBottom: '20px' }}>💳 Cuentas Publicitarias Vinculadas</h4>
-                        <div className="accounts-list" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                            {metaAccounts.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: '20px' }}>
-                                    <p className="text-muted">No hay cuentas vinculadas.</p>
-                                    <button className="btn-secondary" style={{ marginTop: '10px' }} onClick={discoverAccounts}>🔍 Descubrir Cuentas</button>
+                <div className="meta-dynamic-layout" style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
+                    {/* TOP ROW: CONFIG & ACCOUNTS (50/50) */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '25px' }}>
+                        <div className="card" style={{ padding: '25px', marginBottom: 0 }}>
+                            <h4 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>🔑 Configuración Técnica</h4>
+                            <form onSubmit={handleSaveMeta} className="premium-form-v">
+                                <div className="form-group">
+                                    <label>Token de Acceso</label>
+                                    <input type="password" value={metaConfig.access_token} onChange={e => setMetaConfig({ ...metaConfig, access_token: e.target.value })} placeholder="EAA..." required />
                                 </div>
-                            ) : (
-                                metaAccounts.map(acc => (
-                                    <div key={acc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', borderBottom: '1px solid var(--glass-border)' }}>
-                                        <div>
-                                            <strong style={{ fontSize: '0.9rem' }}>{acc.name || acc.ad_account_id}</strong>
-                                            <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>{acc.ad_account_id}</span>
-                                        </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            <span style={{ fontSize: '0.7rem' }}>{acc.is_sync_enabled ? 'Sincronizando' : 'Pausado'}</span>
-                                            <input
-                                                type="checkbox"
-                                                checked={acc.is_sync_enabled}
-                                                onChange={() => toggleAccountSync(acc.id, acc.is_sync_enabled)}
-                                            />
-                                        </div>
+                                <div className="form-group">
+                                    <label>ID de Portafolio / Negocio</label>
+                                    <input type="text" value={metaConfig.business_id} onChange={e => setMetaConfig({ ...metaConfig, business_id: e.target.value })} placeholder="1234567890..." />
+                                </div>
+                                <button type="submit" className="btn-process" disabled={savingMeta} style={{ width: '100%' }}>
+                                    {savingMeta ? "Guardando..." : "💾 Guardar Configuración"}
+                                </button>
+                            </form>
+                        </div>
+
+                        <div className="card" style={{ padding: '25px', marginBottom: 0 }}>
+                            <h4 style={{ marginBottom: '20px' }}>💳 Cuentas Activas</h4>
+                            <div className="accounts-list" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                                {metaAccounts.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '20px' }}>
+                                        <p className="text-muted">No hay cuentas vinculadas.</p>
+                                        <button className="btn-secondary" onClick={discoverAccounts}>🔍 Descubrir</button>
                                     </div>
-                                ))
-                            )}
+                                ) : (
+                                    metaAccounts.map(acc => (
+                                        <div key={acc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid var(--glass-border)' }}>
+                                            <div>
+                                                <strong style={{ fontSize: '0.85rem' }}>{acc.name || acc.ad_account_id}</strong>
+                                                <span style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-muted)' }}>{acc.ad_account_id}</span>
+                                            </div>
+                                            <input type="checkbox" checked={acc.is_sync_enabled} onChange={() => toggleAccountSync(acc.id, acc.is_sync_enabled)} />
+                                        </div>
+                                    ))
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div className="card" style={{ padding: '25px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <h4 style={{ margin: 0 }}>🎯 Mapeo Unificado de Campañas</h4>
-                        <button
-                            type="button"
-                            className="btn-process"
-                            style={{ padding: '8px 15px', fontSize: '0.8rem' }}
-                            onClick={syncPerformance}
-                            disabled={savingMeta}
-                        >
-                            {savingMeta ? "Sincronizando..." : "🔄 Sincronizar Campañas"}
-                        </button>
-                    </div>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '15px' }}>
-                        Asigna campañas de tus cuentas activas a agendas específicas.
-                    </p>
-                    <div className="mapping-container" style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '10px' }}>
-                        {metaCampaigns.filter(c => c.entity_type === 'campaign').length === 0 ? (
-                            <p className="text-muted text-center">No se detectaron campañas aún. Sincroniza primero.</p>
-                        ) : (
-                            metaCampaigns.filter(c => c.entity_type === 'campaign').map(camp => {
-                                const adsets = metaCampaigns.filter(a => a.entity_type === 'adset' && a.parent_id === camp.campaign_id);
-                                const isExpanded = expandedCampaigns.has(camp.campaign_id);
+                    {/* BOTTOM ROW: PERFORMANCE DASHBOARD (100%) */}
+                    <div className="card" style={{ padding: '25px', width: '100%' }}>
+                        {/* ROW 1: HEADER & SYNC */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--glass-border)', paddingBottom: '15px' }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '1.4rem' }}>📊 Dashboard de Rendimiento</h3>
+                                <p className="text-muted" style={{ fontSize: '0.85rem', marginTop: '4px' }}>Análisis métrico y mapeo de leads en tiempo real.</p>
+                            </div>
+                            <button type="button" className="btn-process" onClick={syncPerformance} disabled={savingMeta} style={{ padding: '10px 25px', borderRadius: '10px', boxShadow: '0 4px 15px rgba(var(--primary-rgb), 0.3)' }}>
+                                {savingMeta ? "Sincronizando..." : "🔄 Sincronizar Ahora"}
+                            </button>
+                        </div>
 
-                                return (
-                                    <div key={camp.campaign_id} className="campaign-accordion" style={{ marginBottom: '15px', borderRadius: '12px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.02)', overflow: 'hidden' }}>
-                                        {/* Campaign Header */}
-                                        <div
-                                            onClick={() => {
-                                                const newSet = new Set(expandedCampaigns);
-                                                if (isExpanded) newSet.delete(camp.campaign_id);
-                                                else newSet.add(camp.campaign_id);
-                                                setExpandedCampaigns(newSet);
-                                            }}
-                                            style={{ padding: '15px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)' }}
-                                        >
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                                <span style={{ fontSize: '1.2rem' }}>{isExpanded ? '▼' : '▶'}</span>
-                                                <div>
-                                                    <strong style={{ display: 'block' }}>📢 {camp.campaign_name}</strong>
-                                                    <div style={{ display: 'flex', gap: '10px' }}>
-                                                        <span className={`status-pill ${camp.status?.toLowerCase()}`} style={{ fontSize: '0.6rem', padding: '1px 6px' }}>
+                        {/* ROW 2: FILTERS */}
+                        <div className="filters-row" style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', marginBottom: '25px', background: 'rgba(255,255,255,0.02)', padding: '15px', borderRadius: '15px', border: '1px solid var(--glass-border)' }}>
+                            <div className="filter-group" style={{ display: 'flex', gap: '10px', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '8px 15px', borderRadius: '10px', border: '1px solid var(--glass-border)', flex: '1 1 250px' }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Cuenta:</label>
+                                <div style={{ position: 'relative', flex: 1 }}>
+                                    <div
+                                        onClick={() => setIsMultiSelectOpen(!isMultiSelectOpen)}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.05)',
+                                            padding: '8px 15px',
+                                            borderRadius: '8px',
+                                            border: '1px solid var(--glass-border)',
+                                            fontSize: '0.85rem',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            minWidth: '200px'
+                                        }}
+                                    >
+                                        <span>
+                                            {metaAccountFilter === 'ALL'
+                                                ? '🌍 Todas las Cuentas'
+                                                : Array.isArray(metaAccountFilter) && metaAccountFilter.length > 0
+                                                    ? `✅ ${metaAccountFilter.length} Cuenta ${metaAccountFilter.length > 1 ? 's' : ''}`
+                                                    : '❌ Ninguna seleccionada'}
+                                        </span>
+                                        <span style={{ transition: 'transform 0.3s', transform: isMultiSelectOpen ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
+                                    </div>
+
+                                    {isMultiSelectOpen && (
+                                        <div style={{
+                                            position: 'absolute',
+                                            top: '110%',
+                                            left: 0,
+                                            right: 0,
+                                            background: 'var(--glass-bg)',
+                                            backdropFilter: 'blur(20px)',
+                                            border: '1px solid var(--glass-border)',
+                                            borderRadius: '12px',
+                                            zIndex: 1000,
+                                            boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                                            padding: '10px',
+                                            maxHeight: '300px',
+                                            overflowY: 'auto'
+                                        }}>
+                                            <div
+                                                onClick={() => {
+                                                    setMetaAccountFilter('ALL');
+                                                    setIsMultiSelectOpen(false);
+                                                }}
+                                                style={{
+                                                    padding: '8px 12px',
+                                                    borderRadius: '6px',
+                                                    cursor: 'pointer',
+                                                    background: metaAccountFilter === 'ALL' ? 'rgba(var(--primary-rgb), 0.2)' : 'transparent',
+                                                    marginBottom: '5px',
+                                                    fontSize: '0.85rem'
+                                                }}
+                                            >
+                                                🌍 Todas las Cuentas
+                                            </div>
+                                            {metaAccounts.map(acc => {
+                                                const isSelected = Array.isArray(metaAccountFilter) && metaAccountFilter.includes(acc.ad_account_id);
+                                                return (
+                                                    <div
+                                                        key={acc.id}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            let newList = Array.isArray(metaAccountFilter) ? [...metaAccountFilter] : [];
+                                                            if (newList.includes(acc.ad_account_id)) {
+                                                                newList = newList.filter(id => id !== acc.ad_account_id);
+                                                            } else {
+                                                                newList.push(acc.ad_account_id);
+                                                            }
+                                                            setMetaAccountFilter(newList.length === 0 ? [] : newList);
+                                                        }}
+                                                        style={{
+                                                            padding: '8px 12px',
+                                                            borderRadius: '6px',
+                                                            cursor: 'pointer',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '10px',
+                                                            background: isSelected ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
+                                                            marginBottom: '2px',
+                                                            fontSize: '0.85rem'
+                                                        }}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            readOnly
+                                                            style={{ cursor: 'pointer' }}
+                                                        />
+                                                        <span>{acc.name || acc.ad_account_id}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="filter-group" style={{ display: 'flex', gap: '10px', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '8px 15px', borderRadius: '10px', border: '1px solid var(--glass-border)', flex: '0 1 180px' }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Estado:</label>
+                                <select
+                                    value={metaStatusFilter}
+                                    onChange={(e) => setMetaStatusFilter(e.target.value)}
+                                    style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '0.85rem', outline: 'none', cursor: 'pointer' }}
+                                >
+                                    <option value="ALL">Todos</option>
+                                    <option value="ACTIVE">Activos</option>
+                                    <option value="PAUSED">Pausados</option>
+                                </select>
+                            </div>
+
+                            <div className="filter-group" style={{ display: 'flex', gap: '10px', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '8px 15px', borderRadius: '10px', border: '1px solid var(--glass-border)', flex: '1 1 300px' }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Periodo:</label>
+                                <input type="date" value={metaStartDate} onChange={(e) => setMetaStartDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '0.85rem', outline: 'none' }} />
+                                <span style={{ opacity: 0.5 }}>-</span>
+                                <input type="date" value={metaEndDate} onChange={(e) => setMetaEndDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '0.85rem', outline: 'none' }} />
+                            </div>
+                        </div>
+
+                        {/* ROW 3: TOTALS SUMMARY DASH */}
+                        <div className="totals-summary" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '20px', marginBottom: '30px' }}>
+                            <div className="total-card" style={{ background: 'linear-gradient(135deg, rgba(var(--primary-rgb), 0.2) 0%, rgba(var(--primary-rgb), 0.05) 100%)', padding: '20px', borderRadius: '15px', border: '1px solid rgba(var(--primary-rgb), 0.3)', textAlign: 'center' }}>
+                                <span style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, color: 'var(--primary)', marginBottom: '5px' }}>💰 Inversión Total</span>
+                                <strong style={{ fontSize: '1.5rem', color: 'var(--text-main)' }}>{formatCOP(totals.spend)}</strong>
+                            </div>
+                            <div className="total-card" style={{ background: 'rgba(16, 185, 129, 0.05)', padding: '20px', borderRadius: '15px', border: '1px solid rgba(16, 185, 129, 0.3)', textAlign: 'center' }}>
+                                <span style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, color: '#10b981', marginBottom: '5px' }}>💬 Conversaciones</span>
+                                <strong style={{ fontSize: '1.5rem', color: 'var(--text-main)' }}>{totals.conversations}</strong>
+                            </div>
+                            <div className="total-card" style={{ background: 'rgba(245, 158, 11, 0.05)', padding: '20px', borderRadius: '15px', border: '1px solid rgba(245, 158, 11, 0.3)', textAlign: 'center' }}>
+                                <span style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, color: '#f59e0b', marginBottom: '5px' }}>📈 Costo por Conv.</span>
+                                <strong style={{ fontSize: '1.5rem', color: 'var(--text-main)' }}>{cpa > 0 ? formatCOP(cpa) : '-'}</strong>
+                            </div>
+                            <div className="total-card" style={{ background: 'rgba(255,255,255,0.03)', padding: '20px', borderRadius: '15px', border: '1px solid var(--glass-border)', textAlign: 'center' }}>
+                                <span style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '5px' }}>🖱️ Clics Totales</span>
+                                <strong style={{ fontSize: '1.5rem', color: 'var(--text-main)' }}>{totals.clicks.toLocaleString('es-CO')}</strong>
+                            </div>
+                        </div>
+
+                        <div className="mapping-container" style={{ width: '100%', overflowX: 'auto' }}>
+                            <div style={{ minWidth: '950px' }}>
+                                {/* Dashboard Header Labels */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 3fr) 130px 90px 100px 110px 100px 140px', gap: '15px', padding: '10px 15px', borderBottom: '2px solid var(--glass-border)', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase' }}>
+                                    <span>Campaña / Conjunto (Adset)</span>
+                                    <span style={{ textAlign: 'center' }}>Inversión</span>
+                                    <span style={{ textAlign: 'center' }}>Conv.</span>
+                                    <span style={{ textAlign: 'center' }}>Costo/Conv.</span>
+                                    <span style={{ textAlign: 'center' }}>Clics</span>
+                                    <span style={{ textAlign: 'center' }}>Estado</span>
+                                    <span style={{ textAlign: 'right' }}>Mapeo</span>
+                                </div>
+
+                                {filteredCampaigns.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '80px', background: 'rgba(255,255,255,0.01)', borderRadius: '20px', marginTop: '20px' }}>
+                                        <div style={{ fontSize: '3rem', marginBottom: '15px' }}>🔍</div>
+                                        <h4 style={{ color: 'var(--text-main)' }}>No se encontraron datos</h4>
+                                        <p className="text-muted">Prueba ajustando los filtros de cuenta, estado o periodo.</p>
+                                    </div>
+                                ) : (
+                                    filteredCampaigns.map(camp => {
+                                        const adsets = metaCampaigns.filter(a => a.entity_type === 'adset' && a.parent_id === camp.campaign_id);
+                                        const isExpanded = expandedCampaigns.has(camp.campaign_id);
+
+                                        return (
+                                            <div key={camp.campaign_id} className="campaign-row-v3" style={{ borderBottom: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.01)' }}>
+                                                {/* Campaign Main Row */}
+                                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 3fr) 130px 90px 100px 110px 100px 140px', gap: '15px', padding: '15px', alignItems: 'center' }}>
+                                                    <div
+                                                        onClick={() => {
+                                                            const newSet = new Set(expandedCampaigns);
+                                                            if (isExpanded) newSet.delete(camp.campaign_id);
+                                                            else newSet.add(camp.campaign_id);
+                                                            setExpandedCampaigns(newSet);
+                                                        }}
+                                                        style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}
+                                                    >
+                                                        <span style={{ fontSize: '1rem', width: '20px', transition: 'transform 0.3s' }}>{isExpanded ? '▼' : '▶'}</span>
+                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                            <strong style={{ fontSize: '0.95rem' }}>📢 {camp.campaign_name}</strong>
+                                                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>ID: {camp.campaign_id}</span>
+                                                        </div>
+                                                    </div>
+                                                    <span style={{ textAlign: 'center', fontWeight: 700, color: 'var(--success)' }}>{formatCOP(camp.spend)}</span>
+                                                    <span style={{ textAlign: 'center', fontWeight: 700, color: '#10b981' }}>{camp.conversations_count || 0}</span>
+                                                    <span style={{ textAlign: 'center', fontSize: '0.85rem' }}>{(camp.conversations_count > 0) ? formatCOP(camp.spend / camp.conversations_count) : '-'}</span>
+                                                    <span style={{ textAlign: 'center', fontSize: '0.85rem' }}>{parseInt(camp.clicks || 0).toLocaleString('es-CO')}</span>
+                                                    <div style={{ textAlign: 'center' }}>
+                                                        <span className={`status-pill ${camp.status?.toLowerCase()}`} style={{ fontSize: '0.65rem' }}>
                                                             {camp.status === 'ACTIVE' ? '🟢 Activa' : '⚪ Pausada'}
                                                         </span>
-                                                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                                                            {adsets.length} conjuntos de anuncios
-                                                        </span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '5px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                                        {agendas.map(ag => {
+                                                            const isMapped = metaMappings.some(m => m.meta_entity_id === camp.campaign_id && m.agenda_id === ag.id);
+                                                            return (
+                                                                <button key={ag.id} onClick={() => toggleMapping(camp.campaign_id, ag.id)} className={`mapping-badge ${isMapped ? 'active' : ''}`} style={{
+                                                                    padding: '2px 8px', fontSize: '0.65rem', borderRadius: '10px',
+                                                                    border: '1px solid var(--glass-border)',
+                                                                    background: isMapped ? 'var(--primary)' : 'transparent',
+                                                                    color: isMapped ? 'white' : 'var(--text-muted)',
+                                                                    cursor: 'pointer'
+                                                                }}>
+                                                                    {ag.name.substring(0, 3)}
+                                                                </button>
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
-                                            </div>
-                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', justifyContent: 'flex-end', maxWidth: '200px' }}>
-                                                {agendas.map(ag => {
-                                                    const isMapped = metaMappings.some(m => m.meta_entity_id === camp.campaign_id && m.agenda_id === ag.id);
-                                                    return (
-                                                        <button
-                                                            key={ag.id}
-                                                            onClick={(e) => { e.stopPropagation(); toggleMapping(camp.campaign_id, ag.id); }}
-                                                            style={{
-                                                                padding: '2px 8px', fontSize: '0.65rem', borderRadius: '10px',
-                                                                border: '1px solid var(--glass-border)',
-                                                                background: isMapped ? 'var(--primary)' : 'transparent',
-                                                                color: isMapped ? 'white' : 'var(--text-muted)',
-                                                                cursor: 'pointer'
-                                                            }}
-                                                        >
-                                                            {ag.name}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
 
-                                        {/* Adsets List (Accordion Body) */}
-                                        {isExpanded && (
-                                            <div className="adsets-list animate-in" style={{ padding: '10px 15px 15px 45px', background: 'rgba(0,0,0,0.1)', borderTop: '1px solid var(--glass-border)' }}>
-                                                {adsets.length === 0 ? (
-                                                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '10px 0' }}>No hay conjuntos de anuncios en esta campaña.</p>
-                                                ) : (
-                                                    adsets.map(adset => (
-                                                        <div key={adset.campaign_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>📦 {adset.campaign_name}</span>
-                                                                <span className={`status-pill ${adset.status?.toLowerCase()}`} style={{ fontSize: '0.55rem', padding: '1px 5px' }}>
-                                                                    {adset.status === 'ACTIVE' ? '🟢' : '⚪'}
-                                                                </span>
-                                                            </div>
-                                                            <div style={{ display: 'flex', gap: '5px' }}>
-                                                                {agendas.map(ag => {
-                                                                    const isMapped = metaMappings.some(m => m.meta_entity_id === adset.campaign_id && m.agenda_id === ag.id);
-                                                                    return (
-                                                                        <button
-                                                                            key={ag.id}
-                                                                            onClick={() => toggleMapping(adset.campaign_id, ag.id)}
-                                                                            style={{
+                                                {/* Campaign Adsets (Accordion) */}
+                                                {isExpanded && (
+                                                    <div className="adsets-accordion animate-in" style={{ background: 'rgba(0,0,0,0.15)', borderTop: '1px solid var(--glass-border)' }}>
+                                                        {adsets.map(adset => (
+                                                            <div key={adset.campaign_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 3fr) 140px 120px 100px 120px 220px', gap: '15px', padding: '10px 15px 10px 60px', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                                                                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>📦 {adset.campaign_name}</span>
+                                                                <span style={{ textAlign: 'center', fontSize: '0.85rem' }}>{formatCOP(adset.spend)}</span>
+                                                                <span style={{ textAlign: 'center', fontSize: '0.8rem', opacity: 0.7 }}>{parseInt(adset.impressions || 0).toLocaleString('es-CO')}</span>
+                                                                <span style={{ textAlign: 'center', fontSize: '0.8rem', opacity: 0.7 }}>{parseInt(adset.clicks || 0).toLocaleString('es-CO')}</span>
+                                                                <div style={{ textAlign: 'center' }}>
+                                                                    <span className={`status-pill ${adset.status?.toLowerCase()}`} style={{ fontSize: '0.55rem' }}>
+                                                                        {adset.status === 'ACTIVE' ? '🟢' : '⚪'}
+                                                                    </span>
+                                                                </div>
+                                                                <div style={{ display: 'flex', gap: '5px', justifyContent: 'flex-end' }}>
+                                                                    {agendas.map(ag => {
+                                                                        const isMapped = metaMappings.some(m => m.meta_entity_id === adset.campaign_id && m.agenda_id === ag.id);
+                                                                        return (
+                                                                            <button key={ag.id} onClick={() => toggleMapping(adset.campaign_id, ag.id)} style={{
                                                                                 padding: '2px 6px', fontSize: '0.6rem', borderRadius: '4px',
                                                                                 border: '1px solid var(--glass-border)',
                                                                                 background: isMapped ? 'var(--primary)' : 'transparent',
                                                                                 color: isMapped ? 'white' : 'var(--text-muted)',
                                                                                 cursor: 'pointer'
-                                                                            }}
-                                                                        >
-                                                                            {ag.name}
-                                                                        </button>
-                                                                    );
-                                                                })}
+                                                                            }}>
+                                                                                {ag.name}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    ))
+                                                        ))}
+                                                    </div>
                                                 )}
                                             </div>
-                                        )}
-                                    </div>
-                                );
-                            })
-                        )}
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    );
+        );
+    };
 
     const renderLogs = () => {
         if (loadingLogs) return <div style={{ textAlign: 'center', padding: '50px' }}>Cargando registros de envío...</div>;

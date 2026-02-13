@@ -18,19 +18,16 @@ serve(async (req) => {
             { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
         )
 
-        // Get User info
         const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
         if (authError || !user) throw new Error('Unauthorized')
 
-        // Get Clinic/Profile info to ensure consistency
         const { data: profile } = await supabaseClient.from('profiles').select('clinic_id').eq('id', user.id).single()
         const clinicId = profile?.clinic_id || user.id
 
         const body = await req.json().catch(() => ({}))
-        const { action } = body
+        const { action, startDate, endDate } = body
         if (!action) throw new Error('Action is required')
 
-        // Get Meta Config
         const { data: config, error: configError } = await supabaseClient
             .from('meta_ads_config')
             .select('*')
@@ -39,19 +36,16 @@ serve(async (req) => {
 
         if (configError) throw new Error('Error al obtener configuración: ' + configError.message)
         if (!config?.access_token) {
-            throw new Error('No se encontró configuración de Meta. Asegúrate de guardar el Token de Acceso en el panel antes de sincronizar.')
+            throw new Error('No se encontró configuración de Meta.')
         }
 
         const accessToken = config.access_token
 
         if (action === 'discover-accounts') {
-            // 1. Fetch Accounts from Meta
             const metaResponse = await fetch(`https://graph.facebook.com/v18.0/me/adaccounts?fields=name,account_id&access_token=${accessToken}`)
             const metaData = await metaResponse.json()
-
             if (metaData.error) throw new Error(metaData.error.message)
 
-            // 2. Upsert to DB
             const accountsToUpsert = metaData.data.map((acc: any) => ({
                 clinic_id: clinicId,
                 ad_account_id: `act_${acc.account_id}`,
@@ -70,7 +64,6 @@ serve(async (req) => {
         }
 
         if (action === 'sync-performance') {
-            // 1. Get enabled accounts
             const { data: accounts } = await supabaseClient
                 .from('meta_ads_accounts')
                 .select('*')
@@ -78,93 +71,124 @@ serve(async (req) => {
                 .eq('is_sync_enabled', true)
 
             if (!accounts || accounts.length === 0) {
-                return new Response(JSON.stringify({ success: true, message: 'No active accounts to sync' }), {
+                return new Response(JSON.stringify({ success: true, message: 'No hay cuentas activas para sincronizar.' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 })
             }
 
             let totalSynced = 0
+            const todayStr = new Date().toISOString().split('T')[0]
+            let sinceDate = startDate || new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+            let untilDate = endDate || todayStr
+
+            const diagnostics: any[] = []
 
             for (const account of accounts) {
-                console.log(`Sincronizando cuenta: ${account.ad_account_id}`);
+                try {
+                    // 1. Fetch Campaigns Metadata
+                    const campaignsRes = await fetch(`https://graph.facebook.com/v18.0/${account.ad_account_id}/campaigns?fields=id,name,effective_status&limit=500&access_token=${accessToken}`);
+                    const campaignsData = await campaignsRes.json();
 
-                // 1. Fetch campaigns WITH effective_status
-                const campaignsRes = await fetch(
-                    `https://graph.facebook.com/v18.0/${account.ad_account_id}/campaigns?fields=id,name,effective_status&limit=100&access_token=${accessToken}`
-                );
-                const campaignsData = await campaignsRes.json();
+                    if (campaignsData.error) {
+                        diagnostics.push({ account: account.name, error: campaignsData.error.message });
+                        continue;
+                    }
 
-                if (campaignsData.data) {
-                    const baseCampaigns = campaignsData.data.map((c: any) => ({
-                        clinic_id: clinicId,
-                        ad_account_id: account.ad_account_id,
-                        campaign_id: c.id,
-                        campaign_name: c.name,
-                        entity_type: 'campaign',
-                        status: c.effective_status,
-                        spend: 0,
-                        impressions: 0,
-                        clicks: 0,
-                        date: new Date().toISOString().split('T')[0]
-                    }));
-                    await supabaseClient.from('meta_ads_performance').upsert(baseCampaigns, { onConflict: 'clinic_id,campaign_id,date,entity_type' });
-                    totalSynced += baseCampaigns.length;
+                    const campaignsMap = new Map();
+                    if (campaignsData.data) {
+                        campaignsData.data.forEach((c: any) => campaignsMap.set(c.id, c));
+                    }
 
-                    // 2. Fetch Adsets for these campaigns
-                    const adsetsRes = await fetch(
-                        `https://graph.facebook.com/v18.0/${account.ad_account_id}/adsets?fields=id,name,campaign_id,effective_status&limit=250&access_token=${accessToken}`
+                    // 2. Fetch Insights (Added 'actions' for conversations)
+                    const insightsRes = await fetch(
+                        `https://graph.facebook.com/v18.0/${account.ad_account_id}/insights?fields=campaign_id,spend,impressions,clicks,actions,date_start&level=campaign&time_range=%7B%22since%22%3A%22${sinceDate}%22%2C%22until%22%3A%22${untilDate}%22%7D&time_increment=1&limit=2500&access_token=${accessToken}`
                     );
-                    const adsetsData = await adsetsRes.json();
-                    if (adsetsData.data) {
-                        const baseAdsets = adsetsData.data.map((a: any) => ({
-                            clinic_id: clinicId,
-                            ad_account_id: account.ad_account_id,
-                            campaign_id: a.id,
-                            campaign_name: a.name,
-                            entity_type: 'adset',
-                            status: a.effective_status,
-                            parent_id: a.campaign_id,
-                            spend: 0,
-                            impressions: 0,
-                            clicks: 0,
-                            date: new Date().toISOString().split('T')[0]
-                        }));
-                        await supabaseClient.from('meta_ads_performance').upsert(baseAdsets, { onConflict: 'clinic_id,campaign_id,date,entity_type' });
-                        totalSynced += baseAdsets.length;
-                    }
-                }
+                    const insightsData = await insightsRes.json();
 
-                // 3. Update Insights (spend/clicks)
-                const insightsRes = await fetch(
-                    `https://graph.facebook.com/v18.0/${account.ad_account_id}/insights?fields=campaign_id,campaign_name,spend,impressions,clicks&level=campaign&date_preset=last_30d&access_token=${accessToken}`
-                );
-                const insightsData = await insightsRes.json();
+                    if (insightsData.data) {
+                        const rows = insightsData.data.map((item: any) => {
+                            const metaC = campaignsMap.get(item.campaign_id);
 
-                if (insightsData.data) {
-                    for (const item of insightsData.data) {
-                        await supabaseClient.from('meta_ads_performance').update({
-                            spend: parseFloat(item.spend || 0),
-                            impressions: parseInt(item.impressions || 0),
-                            clicks: parseInt(item.clicks || 0),
-                        }).eq('clinic_id', clinicId).eq('campaign_id', item.campaign_id).eq('date', new Date().toISOString().split('T')[0]).eq('entity_type', 'campaign');
+                            // Extraer conversaciones iniciadas (Sumar todas las variaciones de mensajería)
+                            let convs = 0;
+                            if (item.actions) {
+                                item.actions.forEach((a: any) => {
+                                    if (a.action_type === 'onsite_conversion.messaging_conversation_started_7d' ||
+                                        a.action_type === 'messaging_conversation_started_7d') {
+                                        convs += parseInt(a.value || 0);
+                                    }
+                                });
+                            }
+
+                            return {
+                                clinic_id: clinicId,
+                                ad_account_id: account.ad_account_id,
+                                campaign_id: item.campaign_id,
+                                campaign_name: metaC?.name || 'Campaña Desconocida',
+                                entity_type: 'campaign',
+                                status: metaC?.effective_status || 'ACTIVE',
+                                spend: parseFloat(item.spend || 0),
+                                impressions: parseInt(item.impressions || 0),
+                                clicks: parseInt(item.clicks || 0),
+                                conversations_count: convs,
+                                date: item.date_start
+                            };
+                        });
+
+                        if (rows.length > 0) {
+                            const { error: upsertErr } = await supabaseClient.from('meta_ads_performance').upsert(rows, { onConflict: 'clinic_id,campaign_id,date,entity_type' });
+                            if (!upsertErr) totalSynced += rows.length;
+                        }
                     }
+
+                    // 3. Adsets (Simplified for brevity, following same pattern)
+                    const adsetInsightsRes = await fetch(
+                        `https://graph.facebook.com/v18.0/${account.ad_account_id}/insights?fields=adset_id,campaign_id,spend,impressions,clicks,actions,date_start&level=adset&time_range=%7B%22since%22%3A%22${sinceDate}%22%2C%22until%22%3A%22${untilDate}%22%7D&time_increment=1&limit=2500&access_token=${accessToken}`
+                    );
+                    const adsetInsightsData = await adsetInsightsRes.json();
+                    if (adsetInsightsData.data) {
+                        const aRows = adsetInsightsData.data.map((item: any) => {
+                            let convs = 0;
+                            if (item.actions) {
+                                item.actions.forEach((a: any) => {
+                                    if (a.action_type === 'onsite_conversion.messaging_conversation_started_7d' ||
+                                        a.action_type === 'messaging_conversation_started_7d') {
+                                        convs += parseInt(a.value || 0);
+                                    }
+                                });
+                            }
+                            return {
+                                clinic_id: clinicId,
+                                ad_account_id: account.ad_account_id,
+                                campaign_id: item.adset_id,
+                                campaign_name: 'Adset ' + item.adset_id,
+                                entity_type: 'adset',
+                                parent_id: item.campaign_id,
+                                spend: parseFloat(item.spend || 0),
+                                impressions: parseInt(item.impressions || 0),
+                                clicks: parseInt(item.clicks || 0),
+                                conversations_count: convs,
+                                date: item.date_start
+                            };
+                        });
+                        if (aRows.length > 0) {
+                            await supabaseClient.from('meta_ads_performance').upsert(aRows, { onConflict: 'clinic_id,campaign_id,date,entity_type' });
+                        }
+                    }
+
+                    diagnostics.push({ account: account.name, status: 'OK' });
+                } catch (e) {
+                    diagnostics.push({ account: account.name, error: e.message });
                 }
             }
 
-            return new Response(JSON.stringify({ success: true, synced_campaigns: totalSynced }), {
+            return new Response(JSON.stringify({ success: true, synced_rows: totalSynced, range: `${sinceDate} a ${untilDate}`, diagnostics }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             })
         }
 
-        return new Response(JSON.stringify({ error: 'Invalid action' }), {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
-
+        return new Response(JSON.stringify({ error: 'Invalid action' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     } catch (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
+        return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 })
