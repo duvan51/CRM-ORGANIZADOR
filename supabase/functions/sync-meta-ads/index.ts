@@ -86,29 +86,68 @@ serve(async (req) => {
             let totalSynced = 0
 
             for (const account of accounts) {
-                // Fetch Campaign Insights for the last 30 days
-                const insightsRes = await fetch(
-                    `https://graph.facebook.com/v18.0/${account.ad_account_id}/insights?fields=campaign_id,campaign_name,spend,impressions,clicks&level=campaign&date_preset=last_30d&access_token=${accessToken}`
-                )
-                const insightsData = await insightsRes.json()
+                console.log(`Sincronizando cuenta: ${account.ad_account_id}`);
 
-                if (insightsData.data) {
-                    const performanceData = insightsData.data.map((item: any) => ({
+                // 1. Fetch campaigns WITH effective_status
+                const campaignsRes = await fetch(
+                    `https://graph.facebook.com/v18.0/${account.ad_account_id}/campaigns?fields=id,name,effective_status&limit=100&access_token=${accessToken}`
+                );
+                const campaignsData = await campaignsRes.json();
+
+                if (campaignsData.data) {
+                    const baseCampaigns = campaignsData.data.map((c: any) => ({
                         clinic_id: clinicId,
                         ad_account_id: account.ad_account_id,
-                        campaign_id: item.campaign_id,
-                        campaign_name: item.campaign_name,
-                        spend: parseFloat(item.spend || 0),
-                        impressions: parseInt(item.impressions || 0),
-                        clicks: parseInt(item.clicks || 0),
-                        date: new Date().toISOString().split('T')[0], // Today's sync snapshot
-                    }))
+                        campaign_id: c.id,
+                        campaign_name: c.name,
+                        entity_type: 'campaign',
+                        status: c.effective_status,
+                        spend: 0,
+                        impressions: 0,
+                        clicks: 0,
+                        date: new Date().toISOString().split('T')[0]
+                    }));
+                    await supabaseClient.from('meta_ads_performance').upsert(baseCampaigns, { onConflict: 'clinic_id,campaign_id,date,entity_type' });
+                    totalSynced += baseCampaigns.length;
 
-                    const { error: perfError } = await supabaseClient
-                        .from('meta_ads_performance')
-                        .upsert(performanceData, { onConflict: 'clinic_id,campaign_id,date' })
+                    // 2. Fetch Adsets for these campaigns
+                    const adsetsRes = await fetch(
+                        `https://graph.facebook.com/v18.0/${account.ad_account_id}/adsets?fields=id,name,campaign_id,effective_status&limit=250&access_token=${accessToken}`
+                    );
+                    const adsetsData = await adsetsRes.json();
+                    if (adsetsData.data) {
+                        const baseAdsets = adsetsData.data.map((a: any) => ({
+                            clinic_id: clinicId,
+                            ad_account_id: account.ad_account_id,
+                            campaign_id: a.id,
+                            campaign_name: a.name,
+                            entity_type: 'adset',
+                            status: a.effective_status,
+                            parent_id: a.campaign_id,
+                            spend: 0,
+                            impressions: 0,
+                            clicks: 0,
+                            date: new Date().toISOString().split('T')[0]
+                        }));
+                        await supabaseClient.from('meta_ads_performance').upsert(baseAdsets, { onConflict: 'clinic_id,campaign_id,date,entity_type' });
+                        totalSynced += baseAdsets.length;
+                    }
+                }
 
-                    if (!perfError) totalSynced += performanceData.length
+                // 3. Update Insights (spend/clicks)
+                const insightsRes = await fetch(
+                    `https://graph.facebook.com/v18.0/${account.ad_account_id}/insights?fields=campaign_id,campaign_name,spend,impressions,clicks&level=campaign&date_preset=last_30d&access_token=${accessToken}`
+                );
+                const insightsData = await insightsRes.json();
+
+                if (insightsData.data) {
+                    for (const item of insightsData.data) {
+                        await supabaseClient.from('meta_ads_performance').update({
+                            spend: parseFloat(item.spend || 0),
+                            impressions: parseInt(item.impressions || 0),
+                            clicks: parseInt(item.clicks || 0),
+                        }).eq('clinic_id', clinicId).eq('campaign_id', item.campaign_id).eq('date', new Date().toISOString().split('T')[0]).eq('entity_type', 'campaign');
+                    }
                 }
             }
 

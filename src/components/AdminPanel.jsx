@@ -26,6 +26,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [metaAccounts, setMetaAccounts] = useState([]);
     const [metaMappings, setMetaMappings] = useState([]);
     const [metaCampaigns, setMetaCampaigns] = useState([]);
+    const [expandedCampaigns, setExpandedCampaigns] = useState(new Set());
+    const [showMetaGuide, setShowMetaGuide] = useState(false);
 
     // SMS Automation States
     const [infobipConfig, setInfobipConfig] = useState({ api_key: "", base_url: "", sender_id: "CRM_SMS", is_active: true });
@@ -184,6 +186,35 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     return newTempl;
                 });
             }
+
+            // --- CARGAR CONFIG META ADS ---
+            const { data: mConfig } = await supabase.from('meta_ads_config').select('*').eq('clinic_id', currentClinicId).maybeSingle();
+            if (mConfig) setMetaConfig(mConfig);
+
+            const { data: mAccounts } = await supabase.from('meta_ads_accounts').select('*').eq('clinic_id', currentClinicId);
+            setMetaAccounts(mAccounts || []);
+
+            const { data: mMappings } = await supabase.from('meta_ads_agenda_mapping').select('*').eq('clinic_id', currentClinicId);
+            setMetaMappings(mMappings || []);
+
+            const { data: mCampaigns } = await supabase.from('meta_ads_performance')
+                .select('*')
+                .eq('clinic_id', currentClinicId)
+                .order('date', { ascending: false });
+
+            // Deduplicar para mostrar solo el registro más reciente de cada entidad
+            const uniqueEntities = [];
+            const seenIds = new Set();
+            if (mCampaigns) {
+                mCampaigns.forEach(c => {
+                    const key = `${c.campaign_id}_${c.entity_type}`;
+                    if (!seenIds.has(key)) {
+                        seenIds.add(key);
+                        uniqueEntities.push(c);
+                    }
+                });
+            }
+            setMetaCampaigns(uniqueEntities);
         } catch (error) {
             console.error("Error fetching data:", error);
         }
@@ -1308,28 +1339,6 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         </div>
     );
 
-    useEffect(() => {
-        const fetchMeta = async () => {
-            if (!clinicId) return;
-            // Config
-            const { data: cfg } = await supabase.from('meta_ads_config').select('*').eq('clinic_id', clinicId).maybeSingle();
-            if (cfg) setMetaConfig(cfg);
-
-            // Fetch Linked Accounts
-            const { data: accounts } = await supabase.from('meta_ads_accounts').select('*').eq('clinic_id', clinicId);
-            setMetaAccounts(accounts || []);
-
-            // Fetch campaigns from performance cache (grouped by account if possible)
-            const { data: camps } = await supabase.from('meta_ads_performance').select('campaign_id, campaign_name, ad_account_id').eq('clinic_id', clinicId);
-            const uniqueCamps = Array.from(new Map(camps?.map(item => [item.campaign_id, item])).values());
-            setMetaCampaigns(uniqueCamps);
-
-            // Fetch current mappings
-            const { data: maps } = await supabase.from('meta_ads_agenda_mapping').select('*').eq('clinic_id', clinicId);
-            setMetaMappings(maps || []);
-        };
-        fetchMeta();
-    }, [clinicId]);
 
     const handleSaveMeta = async (e) => {
         e.preventDefault();
@@ -1364,13 +1373,15 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
         setSavingMeta(true);
         try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) throw new Error("No hay sesión activa. Por favor, logueate de nuevo.");
+
             const { data, error } = await supabase.functions.invoke('sync-meta-ads', {
                 body: { action: 'discover-accounts' }
             });
 
             if (error) {
-                // If invoke returns an error object, try to see if it has a message in the body
-                const errorDetails = await error.context?.json?.();
+                const errorDetails = await error.context?.json?.().catch(() => ({}));
                 throw new Error(errorDetails?.error || error.message);
             }
 
@@ -1386,11 +1397,23 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const syncPerformance = async () => {
         setSavingMeta(true);
         try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) throw new Error("No hay sesión activa. Por favor, logueate de nuevo.");
+
             const { data, error } = await supabase.functions.invoke('sync-meta-ads', {
                 body: { action: 'sync-performance' }
             });
-            if (error) throw error;
-            alert(`Sincronización completada. ${data.synced_campaigns} campañas actualizadas.`);
+
+            if (error) {
+                const errorDetails = await error.context?.json?.().catch(() => ({}));
+                throw new Error(errorDetails?.error || error.message);
+            }
+
+            if (data.message) {
+                alert(data.message);
+            } else {
+                alert(`¡Éxito! Sincronización completada. ${data.synced_campaigns} campañas actualizadas.`);
+            }
             fetchData(); // Refresh mappings and performance
         } catch (err) {
             alert("Error en sincronización: " + err.message);
@@ -1417,9 +1440,18 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
     const renderMetaConfig = () => (
         <div className="admin-section fade-in">
-            <div className="section-header">
-                <h3>📱 Gestión Profesional de Meta Ads (Portafolio)</h3>
-                <p className="text-muted">Conecta tu Portafolio de Negocios para gestionar múltiples cuentas y campañas.</p>
+            <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                    <h3>📱 Gestión Profesional de Meta Ads (Portafolio)</h3>
+                    <p className="text-muted">Conecta tu Portafolio de Negocios para gestionar múltiples cuentas y campañas.</p>
+                </div>
+                <button
+                    className="btn-secondary"
+                    onClick={() => setShowMetaGuide(true)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 15px', background: 'rgba(var(--primary-rgb), 0.1)', border: '1px solid var(--primary)' }}
+                >
+                    📖 Guía de Configuración
+                </button>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
@@ -1487,42 +1519,104 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '15px' }}>
                         Asigna campañas de tus cuentas activas a agendas específicas.
                     </p>
-                    <div className="mapping-container" style={{ maxHeight: '600px', overflowY: 'auto' }}>
-                        {metaCampaigns.length === 0 ? (
+                    <div className="mapping-container" style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '10px' }}>
+                        {metaCampaigns.filter(c => c.entity_type === 'campaign').length === 0 ? (
                             <p className="text-muted text-center">No se detectaron campañas aún. Sincroniza primero.</p>
                         ) : (
-                            metaCampaigns.map(camp => (
-                                <div key={camp.campaign_id} style={{ marginBottom: '20px', padding: '15px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                                        <strong style={{ display: 'block' }}>📢 {camp.campaign_name}</strong>
-                                        <span style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px' }}>
-                                            {metaAccounts.find(a => a.ad_account_id === camp.ad_account_id)?.name || camp.ad_account_id}
-                                        </span>
+                            metaCampaigns.filter(c => c.entity_type === 'campaign').map(camp => {
+                                const adsets = metaCampaigns.filter(a => a.entity_type === 'adset' && a.parent_id === camp.campaign_id);
+                                const isExpanded = expandedCampaigns.has(camp.campaign_id);
+
+                                return (
+                                    <div key={camp.campaign_id} className="campaign-accordion" style={{ marginBottom: '15px', borderRadius: '12px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.02)', overflow: 'hidden' }}>
+                                        {/* Campaign Header */}
+                                        <div
+                                            onClick={() => {
+                                                const newSet = new Set(expandedCampaigns);
+                                                if (isExpanded) newSet.delete(camp.campaign_id);
+                                                else newSet.add(camp.campaign_id);
+                                                setExpandedCampaigns(newSet);
+                                            }}
+                                            style={{ padding: '15px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)' }}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                <span style={{ fontSize: '1.2rem' }}>{isExpanded ? '▼' : '▶'}</span>
+                                                <div>
+                                                    <strong style={{ display: 'block' }}>📢 {camp.campaign_name}</strong>
+                                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                                        <span className={`status-pill ${camp.status?.toLowerCase()}`} style={{ fontSize: '0.6rem', padding: '1px 6px' }}>
+                                                            {camp.status === 'ACTIVE' ? '🟢 Activa' : '⚪ Pausada'}
+                                                        </span>
+                                                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                                                            {adsets.length} conjuntos de anuncios
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', justifyContent: 'flex-end', maxWidth: '200px' }}>
+                                                {agendas.map(ag => {
+                                                    const isMapped = metaMappings.some(m => m.meta_entity_id === camp.campaign_id && m.agenda_id === ag.id);
+                                                    return (
+                                                        <button
+                                                            key={ag.id}
+                                                            onClick={(e) => { e.stopPropagation(); toggleMapping(camp.campaign_id, ag.id); }}
+                                                            style={{
+                                                                padding: '2px 8px', fontSize: '0.65rem', borderRadius: '10px',
+                                                                border: '1px solid var(--glass-border)',
+                                                                background: isMapped ? 'var(--primary)' : 'transparent',
+                                                                color: isMapped ? 'white' : 'var(--text-muted)',
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            {ag.name}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+
+                                        {/* Adsets List (Accordion Body) */}
+                                        {isExpanded && (
+                                            <div className="adsets-list animate-in" style={{ padding: '10px 15px 15px 45px', background: 'rgba(0,0,0,0.1)', borderTop: '1px solid var(--glass-border)' }}>
+                                                {adsets.length === 0 ? (
+                                                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '10px 0' }}>No hay conjuntos de anuncios en esta campaña.</p>
+                                                ) : (
+                                                    adsets.map(adset => (
+                                                        <div key={adset.campaign_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>📦 {adset.campaign_name}</span>
+                                                                <span className={`status-pill ${adset.status?.toLowerCase()}`} style={{ fontSize: '0.55rem', padding: '1px 5px' }}>
+                                                                    {adset.status === 'ACTIVE' ? '🟢' : '⚪'}
+                                                                </span>
+                                                            </div>
+                                                            <div style={{ display: 'flex', gap: '5px' }}>
+                                                                {agendas.map(ag => {
+                                                                    const isMapped = metaMappings.some(m => m.meta_entity_id === adset.campaign_id && m.agenda_id === ag.id);
+                                                                    return (
+                                                                        <button
+                                                                            key={ag.id}
+                                                                            onClick={() => toggleMapping(adset.campaign_id, ag.id)}
+                                                                            style={{
+                                                                                padding: '2px 6px', fontSize: '0.6rem', borderRadius: '4px',
+                                                                                border: '1px solid var(--glass-border)',
+                                                                                background: isMapped ? 'var(--primary)' : 'transparent',
+                                                                                color: isMapped ? 'white' : 'var(--text-muted)',
+                                                                                cursor: 'pointer'
+                                                                            }}
+                                                                        >
+                                                                            {ag.name}
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                                        {agendas.map(ag => {
-                                            const isMapped = metaMappings.some(m => m.meta_entity_id === camp.campaign_id && m.agenda_id === ag.id);
-                                            return (
-                                                <button
-                                                    key={ag.id}
-                                                    onClick={() => toggleMapping(camp.campaign_id, ag.id)}
-                                                    style={{
-                                                        padding: '4px 10px',
-                                                        fontSize: '0.75rem',
-                                                        borderRadius: '20px',
-                                                        border: '1px solid var(--glass-border)',
-                                                        background: isMapped ? 'var(--primary)' : 'transparent',
-                                                        color: isMapped ? 'white' : 'var(--text-muted)',
-                                                        cursor: 'pointer'
-                                                    }}
-                                                >
-                                                    {ag.name}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                 </div>
@@ -1753,6 +1847,58 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "superconfig" && renderSuperConfig()}
                 </div>
             </main>
+
+            {/* MODAL: META SETUP GUIDE */}
+            {showMetaGuide && (
+                <div className="modal-overlay" onClick={() => setShowMetaGuide(false)}>
+                    <div className="modal-content premium-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--glass-border)', paddingBottom: '15px' }}>
+                            <h2 style={{ margin: 0 }}>🚀 Guía: Conectar Meta Ads Profesional</h2>
+                            <button className="btn-close" onClick={() => setShowMetaGuide(false)}>×</button>
+                        </div>
+
+                        <div className="guide-steps" style={{ overflowY: 'auto', maxHeight: '70vh', paddingRight: '10px' }}>
+                            <div className="guide-step" style={{ marginBottom: '30px' }}>
+                                <h4 style={{ color: 'var(--primary)', marginBottom: '10px' }}>Paso 1: Ir a Configuración del Negocio</h4>
+                                <p>Entra a tu <strong>Meta Business Suite</strong> y ve a la sección de "Usuarios del Sistema".</p>
+                                <a href="https://business.facebook.com/settings/system-users" target="_blank" rel="noreferrer" className="btn-secondary" style={{ display: 'inline-block', marginTop: '10px', fontSize: '0.8rem' }}>Abrir Meta Business Settings ↗</a>
+                            </div>
+
+                            <div className="guide-step" style={{ marginBottom: '30px' }}>
+                                <h4 style={{ color: 'var(--primary)', marginBottom: '10px' }}>Paso 2: Crear o Seleccionar Usuario</h4>
+                                <p>Si no tienes uno, crea un nuevo <strong>Usuario del Sistema</strong> (nombre sugerido: CRM_INTEGRATOR). El rol debe ser "Administrador".</p>
+                            </div>
+
+                            <div className="guide-step" style={{ marginBottom: '30px' }}>
+                                <h4 style={{ color: 'var(--primary)', marginBottom: '10px' }}>Paso 3: Asignar Activos (Cuentas)</h4>
+                                <p>Haz clic en <strong>Asignar activos</strong> y selecciona todas las <strong>Cuentas Publicitarias</strong> que quieres que el CRM pueda ver. Asegúrate de darles permiso de "Administrar cuenta de anuncios".</p>
+                            </div>
+
+                            <div className="guide-step" style={{ marginBottom: '30px' }}>
+                                <h4 style={{ color: 'var(--primary)', marginBottom: '10px' }}>Paso 4: Generar el Token</h4>
+                                <ol style={{ paddingLeft: '20px', lineHeight: '1.6' }}>
+                                    <li>Haz clic en <strong>Generar nuevo token</strong>.</li>
+                                    <li>Selecciona tu Aplicación (si no tienes una, Meta te pedirá crear una básica).</li>
+                                    <li><strong>IMPORTANTE:</strong> Marca los permisos <code>ads_read</code>, <code>ads_management</code> y <code>business_management</code>.</li>
+                                    <li>Copia el código largo que empieza con <code>EAA...</code></li>
+                                </ol>
+                                <div style={{ background: 'rgba(var(--primary-rgb), 0.1)', padding: '15px', borderRadius: '8px', border: '1px solid var(--primary)', marginTop: '10px' }}>
+                                    <strong>💡 Nota:</strong> Este token es una "llave maestra" que no vence. No la compartas con nadie.
+                                </div>
+                            </div>
+
+                            <div className="guide-step">
+                                <h4 style={{ color: 'var(--primary)', marginBottom: '10px' }}>Paso 5: Pegar y Guardar</h4>
+                                <p>Pega el token en el campo anterior en este panel y haz clic en <strong>💾 Guardar Portafolio</strong>.</p>
+                            </div>
+                        </div>
+
+                        <div className="modal-footer" style={{ marginTop: '30px', borderTop: '1px solid var(--glass-border)', paddingTop: '20px', textAlign: 'right' }}>
+                            <button className="btn-process" onClick={() => setShowMetaGuide(false)}>¡Entendido, ir a configurar!</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL: MANAGE AGENTS */}
             {/* Service Hour Modal */}

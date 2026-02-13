@@ -10,14 +10,17 @@ CREATE TABLE IF NOT EXISTS meta_ads_performance (
     clinic_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
     campaign_name TEXT,
     campaign_id TEXT,
-    ad_account_id TEXT, -- Added for portfolio support
+    ad_account_id TEXT,
+    entity_type TEXT DEFAULT 'campaign', -- 'campaign' or 'adset'
+    status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'PAUSED', 'ARCHIVED'
+    parent_id TEXT, -- ID of the campaign if this is an adset
     spend NUMERIC DEFAULT 0,
     impressions INT DEFAULT 0,
     clicks INT DEFAULT 0,
     leads_count INT DEFAULT 0,
     date DATE DEFAULT CURRENT_DATE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(clinic_id, campaign_id, date)
+    UNIQUE(clinic_id, campaign_id, date, entity_type)
 );
 
 -- Table for Meta API Configuration per clinic
@@ -60,13 +63,21 @@ ALTER TABLE meta_ads_agenda_mapping ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies
 DROP POLICY IF EXISTS "Users can view their clinic ads performance" ON meta_ads_performance;
-CREATE POLICY "Users can view their clinic ads performance" ON meta_ads_performance FOR SELECT USING (clinic_id = (SELECT clinic_id FROM profiles WHERE id = auth.uid()) OR id = auth.uid());
+CREATE POLICY "Users can view their clinic ads performance" ON meta_ads_performance FOR ALL USING (
+    clinic_id = (SELECT COALESCE(clinic_id, id) FROM profiles WHERE id = auth.uid())
+);
 
 DROP POLICY IF EXISTS "Users can manage their clinic ads config" ON meta_ads_config;
-CREATE POLICY "Users can manage their clinic ads config" ON meta_ads_config FOR ALL USING (clinic_id = (SELECT clinic_id FROM profiles WHERE id = auth.uid()) OR id = auth.uid());
+CREATE POLICY "Users can manage their clinic ads config" ON meta_ads_config FOR ALL USING (
+    clinic_id = (SELECT COALESCE(clinic_id, id) FROM profiles WHERE id = auth.uid())
+);
 
 DROP POLICY IF EXISTS "Users can manage their clinic ads accounts" ON meta_ads_accounts;
-CREATE POLICY "Users can manage their clinic ads accounts" ON meta_ads_accounts FOR ALL USING (clinic_id = (SELECT clinic_id FROM profiles WHERE id = auth.uid()) OR id = auth.uid());
+CREATE POLICY "Users can manage their clinic ads accounts" ON meta_ads_accounts FOR ALL USING (
+    clinic_id = (SELECT COALESCE(clinic_id, id) FROM profiles WHERE id = auth.uid())
+);
 
 DROP POLICY IF EXISTS "Users can manage their clinic ads mapping" ON meta_ads_agenda_mapping;
-CREATE POLICY "Users can manage their clinic ads mapping" ON meta_ads_agenda_mapping FOR ALL USING (clinic_id = (SELECT clinic_id FROM profiles WHERE id = auth.uid()) OR id = auth.uid());
+CREATE POLICY "Users can manage their clinic ads mapping" ON meta_ads_agenda_mapping FOR ALL USING (
+    clinic_id = (SELECT COALESCE(clinic_id, id) FROM profiles WHERE id = auth.uid())
+);
