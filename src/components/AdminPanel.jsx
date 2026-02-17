@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 import ConfirmModal from "./ConfirmModal";
@@ -32,7 +32,9 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [metaStartDate, setMetaStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
     const [metaEndDate, setMetaEndDate] = useState(new Date().toISOString().split('T')[0]);
     const [metaAccountFilter, setMetaAccountFilter] = useState("ALL"); // "ALL" o array de ad_account_id
+    const [metaAgendaFilter, setMetaAgendaFilter] = useState("ALL");
     const [isMultiSelectOpen, setIsMultiSelectOpen] = useState(false);
+    const [metaSortConfig, setMetaSortConfig] = useState({ key: 'spend', direction: 'desc' });
 
     // SMS Automation States
     const [infobipConfig, setInfobipConfig] = useState({ api_key: "", base_url: "", sender_id: "CRM_SMS", is_active: true });
@@ -147,7 +149,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             setUsers(usrRes || []);
 
             // --- CARGAR BLOQUEOS ---
-            const { data: blRes } = await supabase.from('bloqueos').select('*, service:global_services(*)').eq('clinic_id', currentClinicId);
+            const { data: blRes } = await supabase.from('bloqueos').select('*').eq('clinic_id', currentClinicId);
             setBlocks(blRes || []);
 
             // --- CARGAR ALERTAS ---
@@ -1497,12 +1499,95 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const formatCOP = (val) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Math.round(val));
 
     const renderMetaConfig = () => {
-        // Calcular Totales Filtrados
-        const filteredCampaigns = metaCampaigns.filter(c =>
-            c.entity_type === 'campaign' &&
-            (metaStatusFilter === 'ALL' || c.status === metaStatusFilter) &&
-            (metaAccountFilter === 'ALL' || (Array.isArray(metaAccountFilter) && metaAccountFilter.includes(c.ad_account_id)))
-        );
+        const handleSort = (key) => {
+            setMetaSortConfig(prev => ({
+                key,
+                direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
+            }));
+        };
+
+        const renderSortIcon = (key) => {
+            if (metaSortConfig.key !== key) return <span style={{ opacity: 0.3, fontSize: '0.6rem', marginLeft: '4px' }}>↕</span>;
+            return <span style={{ color: 'var(--primary)', marginLeft: '4px' }}>{metaSortConfig.direction === 'desc' ? '▼' : '▲'}</span>;
+        };
+
+        // Calcular Totales Filtrados con Lógica de Adsets e Herencia
+        const baseFiltered = (() => {
+            const adsets = metaCampaigns.filter(s => s.entity_type === 'adset');
+            const campaigns = metaCampaigns.filter(s => s.entity_type === 'campaign');
+
+            const getAgendaForAdset = (adset) => {
+                const directMap = metaMappings.find(m => m.meta_entity_id === adset.campaign_id);
+                if (directMap) return directMap.agenda_id;
+                const parentMap = metaMappings.find(m => m.meta_entity_id === adset.parent_id);
+                if (parentMap) return parentMap.agenda_id;
+                return null;
+            };
+
+            const matchesGeneralFilters = (c) => {
+                const matchesStatus = metaStatusFilter === 'ALL' || c.status === metaStatusFilter;
+                const matchesAccount = metaAccountFilter === 'ALL' || (Array.isArray(metaAccountFilter) && metaAccountFilter.includes(c.ad_account_id));
+                return matchesStatus && matchesAccount;
+            };
+
+            if (metaAgendaFilter === 'ALL') {
+                return campaigns.filter(matchesGeneralFilters);
+            }
+
+            const targetId = parseInt(metaAgendaFilter);
+            const filteredAdsets = adsets.filter(a => getAgendaForAdset(a) === targetId && matchesGeneralFilters(a));
+
+            const resolvedCampsMap = {};
+            filteredAdsets.forEach(a => {
+                const pId = a.parent_id;
+                if (!pId) return;
+                if (!resolvedCampsMap[pId]) {
+                    const baseCamp = campaigns.find(c => c.campaign_id === pId);
+                    if (baseCamp) {
+                        resolvedCampsMap[pId] = { ...baseCamp, spend: 0, impressions: 0, clicks: 0, conversations_count: 0 };
+                    } else {
+                        resolvedCampsMap[pId] = {
+                            campaign_id: pId, campaign_name: "Campaña (Detalle)", entity_type: 'campaign',
+                            spend: 0, impressions: 0, clicks: 0, conversations_count: 0, status: a.status, ad_account_id: a.ad_account_id
+                        };
+                    }
+                }
+                resolvedCampsMap[pId].spend += parseFloat(a.spend || 0);
+                resolvedCampsMap[pId].impressions += parseInt(a.impressions || 0);
+                resolvedCampsMap[pId].clicks += parseInt(a.clicks || 0);
+                resolvedCampsMap[pId].conversations_count += parseInt(a.conversations_count || 0);
+            });
+
+            // Incluir campañas mapeadas directamente pero con filtros generales
+            metaMappings.filter(m => m.agenda_id === targetId).forEach(m => {
+                const camp = campaigns.find(c => c.campaign_id === m.meta_entity_id);
+                if (camp && !resolvedCampsMap[camp.campaign_id] && matchesGeneralFilters(camp)) {
+                    resolvedCampsMap[camp.campaign_id] = { ...camp };
+                }
+            });
+
+            return Object.values(resolvedCampsMap);
+        })();
+
+        // Aplicar Ordenamiento
+        const filteredCampaigns = [...baseFiltered].sort((a, b) => {
+            const { key, direction } = metaSortConfig;
+            let valA, valB;
+
+            if (key === 'cpa') {
+                valA = (a.conversations_count > 0) ? (a.spend / a.conversations_count) : 0;
+                valB = (b.conversations_count > 0) ? (b.spend / b.conversations_count) : 0;
+            } else if (key === 'mapeo') {
+                valA = metaMappings.filter(m => m.meta_entity_id === a.campaign_id).length;
+                valB = metaMappings.filter(m => m.meta_entity_id === b.campaign_id).length;
+            } else {
+                valA = a[key] || 0;
+                valB = b[key] || 0;
+            }
+
+            if (direction === 'asc') return valA > valB ? 1 : -1;
+            return valA < valB ? 1 : -1;
+        });
 
         const totals = filteredCampaigns.reduce((acc, c) => ({
             spend: acc.spend + parseFloat(c.spend || 0),
@@ -1702,11 +1787,31 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 </select>
                             </div>
 
-                            <div className="filter-group" style={{ display: 'flex', gap: '10px', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '8px 15px', borderRadius: '10px', border: '1px solid var(--glass-border)', flex: '1 1 300px' }}>
-                                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Periodo:</label>
-                                <input type="date" value={metaStartDate} onChange={(e) => setMetaStartDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '0.85rem', outline: 'none' }} />
-                                <span style={{ opacity: 0.5 }}>-</span>
-                                <input type="date" value={metaEndDate} onChange={(e) => setMetaEndDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '0.85rem', outline: 'none' }} />
+                            <div className="filter-group" style={{ display: 'flex', gap: '15px', alignItems: 'center', flexDirection: 'row', flex: '1 1 200px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Agenda</label>
+                                    <select
+                                        value={metaAgendaFilter}
+                                        onChange={(e) => setMetaAgendaFilter(e.target.value)}
+                                        style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', background: '#ffffff', color: '#333', fontWeight: '600', fontSize: '0.8rem', cursor: 'pointer' }}
+                                    >
+                                        <option value="ALL">🌍 Todas</option>
+                                        {agendas.map(ag => (
+                                            <option key={ag.id} value={ag.id}>📍 {ag.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="filter-group" style={{ display: 'flex', gap: '15px', alignItems: 'center', flexDirection: 'row', flex: '1 1 300px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Desde</label>
+                                    <input type="date" value={metaStartDate} onChange={(e) => setMetaStartDate(e.target.value)} style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', background: '#ffffff', color: '#333', fontWeight: '600', fontSize: '0.8rem' }} />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Hasta</label>
+                                    <input type="date" value={metaEndDate} onChange={(e) => setMetaEndDate(e.target.value)} style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', background: '#ffffff', color: '#333', fontWeight: '600', fontSize: '0.8rem' }} />
+                                </div>
                             </div>
                         </div>
 
@@ -1734,13 +1839,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             <div style={{ minWidth: '950px' }}>
                                 {/* Dashboard Header Labels */}
                                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 3fr) 130px 90px 100px 110px 100px 140px', gap: '15px', padding: '10px 15px', borderBottom: '2px solid var(--glass-border)', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase' }}>
-                                    <span>Campaña / Conjunto (Adset)</span>
-                                    <span style={{ textAlign: 'center' }}>Inversión</span>
-                                    <span style={{ textAlign: 'center' }}>Conv.</span>
-                                    <span style={{ textAlign: 'center' }}>Costo/Conv.</span>
-                                    <span style={{ textAlign: 'center' }}>Clics</span>
-                                    <span style={{ textAlign: 'center' }}>Estado</span>
-                                    <span style={{ textAlign: 'right' }}>Mapeo</span>
+                                    <span onClick={() => handleSort('campaign_name')} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>Campaña / Adset {renderSortIcon('campaign_name')}</span>
+                                    <span onClick={() => handleSort('spend')} style={{ textAlign: 'center', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Inversión {renderSortIcon('spend')}</span>
+                                    <span onClick={() => handleSort('conversations_count')} style={{ textAlign: 'center', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Conv. {renderSortIcon('conversations_count')}</span>
+                                    <span onClick={() => handleSort('cpa')} style={{ textAlign: 'center', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Costo/Conv. {renderSortIcon('cpa')}</span>
+                                    <span onClick={() => handleSort('clicks')} style={{ textAlign: 'center', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Clics {renderSortIcon('clicks')}</span>
+                                    <span onClick={() => handleSort('status')} style={{ textAlign: 'center', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Estado {renderSortIcon('status')}</span>
+                                    <span onClick={() => handleSort('mapeo')} style={{ textAlign: 'right', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>Mapeo {renderSortIcon('mapeo')}</span>
                                 </div>
 
                                 {filteredCampaigns.length === 0 ? (

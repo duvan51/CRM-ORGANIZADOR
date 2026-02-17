@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "../supabase";
 
 const SmsLogsList = ({ phone, clinicId }) => {
@@ -219,7 +219,7 @@ const AgentDashboard = ({ user }) => {
     const [allSellers, setAllSellers] = useState([]);
     const [selectedSeller, setSelectedSeller] = useState((user.role === "superuser" || user.role === "admin") ? "Todos" : (user.full_name || user.username));
     const [showDetail, setShowDetail] = useState(null);
-    const [view, setView] = useState("general"); // "general" or "meta"
+    const [view, setView] = useState("general"); // "general", "meta", or "profit"
 
     const months = [
         "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -376,19 +376,25 @@ const AgentDashboard = ({ user }) => {
         const [metaLoading, setMetaLoading] = useState(true);
         const [mappings, setMappings] = useState([]);
         const [selectedAgendaId, setSelectedAgendaId] = useState("Todas");
+        const [expandedCamps, setExpandedCamps] = useState(new Set());
+        const [sortConfig, setSortConfig] = useState({ key: 'spend', direction: 'desc' });
+
+        // Filtros de fecha exclusivos para Meta
+        const [metaStartDate, setMetaStartDate] = useState(dateRange.start);
+        const [metaEndDate, setMetaEndDate] = useState(dateRange.end);
 
         useEffect(() => {
             const fetchData = async () => {
                 setMetaLoading(true);
                 try {
                     const clinicId = user.clinic_id || user.id;
-                    // Fetch Stats
+                    // Fetch Stats con fechas de Meta
                     const { data: statsData } = await supabase
                         .from('meta_ads_performance')
                         .select('*')
                         .eq('clinic_id', clinicId)
-                        .gte('date', dateRange.start)
-                        .lte('date', dateRange.end)
+                        .gte('date', metaStartDate)
+                        .lte('date', metaEndDate)
                         .order('date', { ascending: false });
 
                     // Fetch Mappings
@@ -406,24 +412,7 @@ const AgentDashboard = ({ user }) => {
                 }
             };
             fetchData();
-        }, [dateRange]);
-
-        const filteredMetaStats = useMemo(() => {
-            if (selectedAgendaId === "Todas") return metaStats;
-            const campaignIds = mappings
-                .filter(m => m.agenda_id === selectedAgendaId)
-                .map(m => m.meta_entity_id);
-            return metaStats.filter(s => campaignIds.includes(s.campaign_id));
-        }, [metaStats, mappings, selectedAgendaId]);
-
-        const totals = useMemo(() => {
-            return filteredMetaStats.reduce((acc, curr) => ({
-                spend: acc.spend + (curr.spend || 0),
-                clicks: acc.clicks + (curr.clicks || 0),
-                impressions: acc.impressions + (curr.impressions || 0),
-                leads: acc.leads + (curr.leads_count || 0)
-            }), { spend: 0, clicks: 0, impressions: 0, leads: 0 });
-        }, [filteredMetaStats]);
+        }, [metaStartDate, metaEndDate]);
 
         const metaLeadsInCitas = useMemo(() => {
             let filteredCitas = citas;
@@ -437,6 +426,145 @@ const AgentDashboard = ({ user }) => {
                 mappings.some(m => m.meta_entity_id === c.meta_ad_id && (selectedAgendaId === "Todas" || m.agenda_id === selectedAgendaId))
             );
         }, [citas, selectedAgendaId, mappings]);
+
+        const { campaigns, adsets } = useMemo(() => {
+            // 1. Agrupar metaStats por ID para sumar valores del periodo (Base de datos plana)
+            const grouped = {};
+            metaStats.forEach(s => {
+                const key = `${s.campaign_id}_${s.entity_type}`;
+                if (!grouped[key]) {
+                    grouped[key] = { ...s, spend: 0, clicks: 0, impressions: 0, leads_count: 0 };
+                }
+                grouped[key].spend += (s.spend || 0);
+                grouped[key].clicks += (s.clicks || 0);
+                grouped[key].impressions += (s.impressions || 0);
+                grouped[key].leads_count += (s.leads_count || 0);
+            });
+
+            const aggregatedStats = Object.values(grouped);
+            const asets = aggregatedStats.filter(s => s.entity_type === 'adset');
+            const camps = aggregatedStats.filter(s => s.entity_type === 'campaign');
+
+            // 2. Resolver Agenda por Adset con Herencia
+            const getAgendaForAdset = (adset) => {
+                // Prioridad 1: Mapeo directo del Adset
+                const directMap = mappings.find(m => m.meta_entity_id === adset.campaign_id);
+                if (directMap) return directMap.agenda_id;
+
+                // Prioridad 2: Herencia de la Campaña Padre
+                const parentMap = mappings.find(m => m.meta_entity_id === adset.parent_id);
+                if (parentMap) return parentMap.agenda_id;
+
+                return null; // Sin asignar
+            };
+
+            // Pre-calcular leads de CRM para cada entidad para ordenamiento
+            const getLeadsForEntity = (entityId, entityName) => {
+                return metaLeadsInCitas.filter(c => c.meta_ad_id === entityId || c.utm_campaign === entityName).length;
+            };
+
+            const getCPLForEntity = (spend, leadsCount) => {
+                return leadsCount > 0 ? (spend / leadsCount) : spend;
+            };
+
+            let campsData = [];
+            let filteredAdsets = [];
+
+            if (selectedAgendaId === "Todas") {
+                campsData = camps;
+                filteredAdsets = asets;
+            } else {
+                const targetId = parseInt(selectedAgendaId);
+
+                // Filtrar Adsets que pertenecen a esta agenda (por mapeo directo o herencia)
+                filteredAdsets = asets.filter(a => getAgendaForAdset(a) === targetId);
+
+                // Construir campañas basadas ÚNICAMENTE en los adsets filtrados (Concordancia Real)
+                const resolvedCampsMap = {};
+                filteredAdsets.forEach(a => {
+                    const pId = a.parent_id;
+                    if (!pId) return;
+
+                    if (!resolvedCampsMap[pId]) {
+                        const baseCamp = camps.find(c => c.campaign_id === pId);
+                        if (baseCamp) {
+                            resolvedCampsMap[pId] = { ...baseCamp, spend: 0, clicks: 0, impressions: 0, leads_count: 0 };
+                        } else {
+                            resolvedCampsMap[pId] = {
+                                campaign_id: pId,
+                                campaign_name: "Campaña (Detalle)",
+                                entity_type: 'campaign',
+                                spend: 0, clicks: 0, impressions: 0, leads_count: 0
+                            };
+                        }
+                    }
+                    resolvedCampsMap[pId].spend += a.spend;
+                    resolvedCampsMap[pId].clicks += a.clicks;
+                    resolvedCampsMap[pId].impressions += a.impressions;
+                    resolvedCampsMap[pId].leads_count += a.leads_count;
+                });
+
+                // Incluir campañas que estén mapeadas directamente aunque no tengan adsets en los datos
+                mappings.filter(m => m.agenda_id === targetId).forEach(m => {
+                    const camp = camps.find(c => c.campaign_id === m.meta_entity_id);
+                    if (camp && !resolvedCampsMap[camp.campaign_id]) {
+                        resolvedCampsMap[camp.campaign_id] = { ...camp };
+                    }
+                });
+
+                campsData = Object.values(resolvedCampsMap);
+            }
+
+            // APLICAR ORDENAMIENTO
+            const sortData = (data) => {
+                return [...data].sort((a, b) => {
+                    let valA, valB;
+
+                    switch (sortConfig.key) {
+                        case 'campaign_name':
+                            valA = (a.campaign_name || '').toLowerCase();
+                            valB = (b.campaign_name || '').toLowerCase();
+                            break;
+                        case 'spend':
+                            valA = a.spend;
+                            valB = b.spend;
+                            break;
+                        case 'clicks':
+                            valA = a.clicks;
+                            valB = b.clicks;
+                            break;
+                        case 'cpl':
+                            valA = getCPLForEntity(a.spend, a.leads_count);
+                            valB = getCPLForEntity(b.spend, b.leads_count);
+                            break;
+                        case 'leads':
+                            valA = getLeadsForEntity(a.campaign_id, a.campaign_name);
+                            valB = getLeadsForEntity(b.campaign_id, b.campaign_name);
+                            break;
+                        default:
+                            valA = a.spend;
+                            valB = b.spend;
+                    }
+
+                    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+                    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+                    return 0;
+                });
+            };
+
+            return { campaigns: sortData(campsData), adsets: filteredAdsets };
+        }, [metaStats, mappings, selectedAgendaId, sortConfig, metaLeadsInCitas]);
+
+        const totals = useMemo(() => {
+            return campaigns.reduce((acc, curr) => ({
+                spend: acc.spend + (curr.spend || 0),
+                clicks: acc.clicks + (curr.clicks || 0),
+                impressions: acc.impressions + (curr.impressions || 0),
+                leads: acc.leads + (curr.leads_count || 0)
+            }), { spend: 0, clicks: 0, impressions: 0, leads: 0 });
+        }, [campaigns]);
+
+
 
         const revenueFromMeta = useMemo(() => {
             return metaLeadsInCitas.reduce((acc, c) => {
@@ -480,7 +608,7 @@ const AgentDashboard = ({ user }) => {
                     </div>
                 </div>
 
-                <div className="dashboard-controls card" style={{ marginBottom: '20px', display: 'flex', gap: '20px', alignItems: 'center' }}>
+                <div className="dashboard-controls card" style={{ marginBottom: '20px', display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <div className="filter-group">
                         <label>Filtrar por Agenda</label>
                         <select value={selectedAgendaId} onChange={e => setSelectedAgendaId(e.target.value)}>
@@ -490,14 +618,25 @@ const AgentDashboard = ({ user }) => {
                             ))}
                         </select>
                     </div>
+
+                    <div className="filter-group" style={{ display: 'flex', gap: '15px', alignItems: 'center', flexDirection: 'row' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: '0.85rem' }}>Desde</label>
+                            <input type="date" value={metaStartDate} onChange={e => setMetaStartDate(e.target.value)} style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', background: '#ffffff', color: '#333', fontWeight: '600' }} />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: '0.85rem' }}>Hasta</label>
+                            <input type="date" value={metaEndDate} onChange={e => setMetaEndDate(e.target.value)} style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', background: '#ffffff', color: '#333', fontWeight: '600' }} />
+                        </div>
+                    </div>
                 </div>
 
                 <div className="dashboard-table-container card">
                     <div className="table-header-dash">
-                        <h3>Rendimiento por Campaña {selectedAgendaId !== "Todas" ? `(Agenda: ${user.agendas.find(a => a.id === selectedAgendaId)?.name})` : ''}</h3>
+                        <h3>Rendimiento por Campaña {selectedAgendaId !== "Todas" ? `(Agenda: ${user.agendas?.find(a => a.id === parseInt(selectedAgendaId))?.name || 'Seleccionada'})` : ''}</h3>
                     </div>
-                    <div className="table-wrapper" style={{ padding: '20px' }}>
-                        {filteredMetaStats.length === 0 ? (
+                    <div className="table-wrapper" style={{ padding: '0 20px 20px 20px' }}>
+                        {campaigns.length === 0 ? (
                             <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                                 {metaLoading ? "Cargando datos de Meta..." : "No hay datos de campañas asignadas a esta agenda en este periodo."}
                             </div>
@@ -505,30 +644,453 @@ const AgentDashboard = ({ user }) => {
                             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
                                     <tr style={{ borderBottom: '1px solid var(--glass-border)', textAlign: 'left' }}>
-                                        <th style={{ padding: '12px' }}>Campaña</th>
-                                        <th style={{ padding: '12px' }}>Gasto</th>
-                                        <th style={{ padding: '12px' }}>Clicks</th>
-                                        <th style={{ padding: '12px' }}>CPL</th>
-                                        <th style={{ padding: '12px' }}>Leads (CRM)</th>
+                                        {[
+                                            { label: 'Campaña', key: 'campaign_name' },
+                                            { label: 'Gasto', key: 'spend' },
+                                            { label: 'Clicks', key: 'clicks' },
+                                            { label: 'CPL', key: 'cpl' },
+                                            { label: 'Leads (CRM)', key: 'leads' }
+                                        ].map(col => (
+                                            <th
+                                                key={col.key}
+                                                style={{ padding: '12px', cursor: 'pointer', userSelect: 'none' }}
+                                                onClick={() => {
+                                                    setSortConfig(prev => ({
+                                                        key: col.key,
+                                                        direction: prev.key === col.key && prev.direction === 'desc' ? 'asc' : 'desc'
+                                                    }));
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                    {col.label}
+                                                    <span style={{ fontSize: '0.7rem', color: sortConfig.key === col.key ? 'var(--primary)' : '#666' }}>
+                                                        {sortConfig.key === col.key ? (sortConfig.direction === 'desc' ? '▼' : '▲') : '↕'}
+                                                    </span>
+                                                </div>
+                                            </th>
+                                        ))}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredMetaStats.map(stat => (
-                                        <tr key={stat.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                                            <td style={{ padding: '12px' }}>{stat.campaign_name}</td>
-                                            <td style={{ padding: '12px' }}>${stat.spend.toLocaleString()}</td>
-                                            <td style={{ padding: '12px' }}>{stat.clicks}</td>
-                                            <td style={{ padding: '12px' }}>
-                                                ${stat.leads_count > 0 ? (stat.spend / stat.leads_count).toFixed(0) : stat.spend}
-                                            </td>
-                                            <td style={{ padding: '12px' }}>
-                                                {metaLeadsInCitas.filter(c => c.meta_ad_id === stat.campaign_id || c.utm_campaign === stat.campaign_name).length}
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {campaigns.map(camp => {
+                                        const isExpanded = expandedCamps.has(camp.campaign_id);
+                                        const children = adsets.filter(a => a.parent_id === camp.campaign_id);
+
+                                        return (
+                                            <React.Fragment key={camp.campaign_id}>
+                                                <tr
+                                                    style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', background: isExpanded ? 'rgba(255,255,255,0.05)' : 'transparent' }}
+                                                    onClick={() => {
+                                                        const next = new Set(expandedCamps);
+                                                        if (isExpanded) next.delete(camp.campaign_id);
+                                                        else next.add(camp.campaign_id);
+                                                        setExpandedCamps(next);
+                                                    }}
+                                                >
+                                                    <td style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <span style={{ fontSize: '0.8rem', width: '15px' }}>{isExpanded ? '▼' : '▶'}</span>
+                                                        <strong>📢 {camp.campaign_name}</strong>
+                                                    </td>
+                                                    <td style={{ padding: '12px', fontWeight: 700 }}>${camp.spend.toLocaleString()}</td>
+                                                    <td style={{ padding: '12px' }}>{camp.clicks}</td>
+                                                    <td style={{ padding: '12px' }}>
+                                                        ${camp.leads_count > 0 ? (camp.spend / camp.leads_count).toFixed(0) : camp.spend}
+                                                    </td>
+                                                    <td style={{ padding: '12px' }}>
+                                                        {metaLeadsInCitas.filter(c => c.meta_ad_id === camp.campaign_id || c.utm_campaign === camp.campaign_name).length}
+                                                    </td>
+                                                </tr>
+                                                {isExpanded && children.map(adset => (
+                                                    <tr key={adset.campaign_id} style={{ background: 'rgba(0,0,0,0.2)', fontSize: '0.85rem', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                                                        <td style={{ padding: '10px 10px 10px 40px', color: 'var(--text-muted)' }}>
+                                                            📦 {adset.campaign_name}
+                                                        </td>
+                                                        <td style={{ padding: '10px' }}>${adset.spend.toLocaleString()}</td>
+                                                        <td style={{ padding: '10px' }}>{adset.clicks}</td>
+                                                        <td style={{ padding: '10px' }}>
+                                                            ${adset.leads_count > 0 ? (adset.spend / adset.leads_count).toFixed(0) : adset.spend}
+                                                        </td>
+                                                        <td style={{ padding: '10px' }}>
+                                                            {metaLeadsInCitas.filter(c => c.meta_ad_id === adset.campaign_id).length}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </React.Fragment>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         )}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const ConsolidatedView = () => {
+        const [manualData, setManualData] = useState([]);
+        const [metaAggregated, setMetaAggregated] = useState({});
+        const [loading, setLoading] = useState(true);
+        const [saving, setSaving] = useState(false);
+        const [isEditing, setIsEditing] = useState(false);
+
+        const currentYear = new Date().getFullYear();
+        const currentMonth = new Date().getMonth(); // 0-11
+
+        const allAgendas = [{ id: -1, name: "🌐 TOTAL CONSOLIDADO / CLÍNICA" }, ...(user.agendas || [])];
+        const allSellersWithGeneral = [{ full_name: "💼 VENTA PRESENCIAL / GENERAL" }, ...allSellers];
+
+        // Calcular Totales Globales (Sumatoria)
+        const getGlobalTotals = () => {
+            let totalAds = Object.values(metaAggregated).reduce((a, b) => a + b, 0);
+            let totalSales = manualData.filter(d => d.agenda_id !== null).reduce((a, b) => a + (b.agendados_cop || 0), 0);
+            let totalLeads = manualData.filter(d => d.agenda_id !== null).reduce((a, b) => a + (b.leads_received || 0), 0);
+
+            // Consolidar estadísticas de agentes
+            let globalAgentStats = {};
+            manualData.filter(d => d.agenda_id !== null).forEach(d => {
+                if (d.agent_stats) {
+                    Object.keys(d.agent_stats).forEach(agent => {
+                        if (!globalAgentStats[agent]) globalAgentStats[agent] = { sales: 0, leads: 0 };
+                        globalAgentStats[agent].sales += (d.agent_stats[agent].sales || 0);
+                        globalAgentStats[agent].leads += (d.agent_stats[agent].leads || 0);
+                    });
+                }
+            });
+
+            return { adsSpend: totalAds, agendados_cop: totalSales, leads_received: totalLeads, agent_stats: globalAgentStats };
+        };
+
+        const globalTotals = getGlobalTotals();
+
+        // Cargar datos consolidados
+        useEffect(() => {
+            const fetchConsolidated = async () => {
+                setLoading(true);
+                const clinicId = user.clinic_id || user.id;
+
+                // 1. Meta Ads Performance para el mes seleccionado
+                const mStart = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
+                const mEnd = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
+
+                const { data: adsData } = await supabase
+                    .from('meta_ads_performance')
+                    .select('*')
+                    .eq('clinic_id', clinicId)
+                    .gte('date', mStart)
+                    .lte('date', mEnd);
+
+                // Agrupar por agenda
+                const { data: maps } = await supabase.from('meta_ads_agenda_mapping').select('*').eq('clinic_id', clinicId);
+
+                const adsByAgenda = {};
+                adsData?.forEach(s => {
+                    if (s.entity_type === 'adset') {
+                        // Resolver agenda por adset con herencia (Prioridad: Adset > Campaña)
+                        const directMap = maps?.find(m => m.meta_entity_id === s.campaign_id);
+                        const parentMap = maps?.find(m => m.meta_entity_id === s.parent_id);
+                        const resolvedAgendaId = directMap?.agenda_id || parentMap?.agenda_id;
+
+                        if (resolvedAgendaId) {
+                            if (!adsByAgenda[resolvedAgendaId]) adsByAgenda[resolvedAgendaId] = 0;
+                            adsByAgenda[resolvedAgendaId] += (s.spend || 0);
+                        }
+                    }
+                });
+                setMetaAggregated(adsByAgenda);
+
+                // 2. Datos Manuales
+                const { data: manData } = await supabase
+                    .from('manual_performance_data')
+                    .select('*')
+                    .eq('clinic_id', clinicId)
+                    .eq('month', selectedMonth + 1)
+                    .eq('year', selectedYear);
+
+                setManualData(manData || []);
+                setLoading(false);
+            };
+            fetchConsolidated();
+        }, [selectedMonth, selectedYear]);
+
+        const handleSave = async (agendaId, field, value) => {
+            setSaving(true);
+            const clinicId = user.clinic_id || user.id;
+            const existing = manualData.find(d => d.agenda_id === agendaId);
+
+            const payload = {
+                clinic_id: clinicId,
+                agenda_id: agendaId === -1 ? null : agendaId,
+                month: selectedMonth + 1,
+                year: selectedYear,
+                ...(existing || {}),
+                [field]: value,
+                updated_at: new Date().toISOString()
+            };
+
+            // Eliminar ids nulos o problematicos si existen en el spread de 'existing'
+            if (payload.id === undefined) delete payload.id;
+
+            const { data, error } = await supabase
+                .from('manual_performance_data')
+                .upsert(payload, { onConflict: 'clinic_id,agenda_id,month,year' })
+                .select()
+                .single();
+
+            if (!error) {
+                setManualData(prev => {
+                    const filtered = prev.filter(d => d.agenda_id !== agendaId);
+                    return [...filtered, data];
+                });
+            }
+            setSaving(false);
+        };
+
+        const formatCOP = (val) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Math.round(val));
+
+        return (
+            <div className="consolidated-view animate-in">
+                <div className="dashboard-controls card" style={{ marginBottom: '20px', padding: '20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                        <div className="year-selector" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                            <label style={{ fontWeight: 'bold' }}>Año:</label>
+                            <select
+                                value={selectedYear}
+                                onChange={e => handleMonthYearChange(selectedMonth, parseInt(e.target.value))}
+                                style={{ background: 'var(--primary)', color: 'white', borderRadius: '8px', padding: '5px 15px', border: 'none' }}
+                            >
+                                {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                        </div>
+                        <button
+                            className={`btn-${isEditing ? 'success' : 'primary'}`}
+                            onClick={() => setIsEditing(!isEditing)}
+                            style={{ padding: '8px 20px', borderRadius: '20px', display: 'flex', gap: '8px', alignItems: 'center' }}
+                        >
+                            {isEditing ? '🔒 Finalizar Edición' : '🔓 Editar Datos'}
+                        </button>
+                    </div>
+
+                    <div className="months-navigation" style={{
+                        display: 'flex',
+                        gap: '8px',
+                        overflowX: 'auto',
+                        paddingBottom: '10px',
+                        borderTop: '1px solid var(--glass-border)',
+                        paddingTop: '15px'
+                    }}>
+                        {months.map((m, i) => {
+                            const isFuture = selectedYear === currentYear && i > currentMonth;
+                            const isActive = selectedMonth === i;
+
+                            return (
+                                <button
+                                    key={m}
+                                    disabled={isFuture}
+                                    onClick={() => handleMonthYearChange(i, selectedYear)}
+                                    style={{
+                                        padding: '8px 15px',
+                                        borderRadius: '15px',
+                                        border: '1px solid var(--glass-border)',
+                                        background: isActive ? 'var(--primary)' : 'transparent',
+                                        color: isFuture ? '#666' : 'white',
+                                        cursor: isFuture ? 'not-allowed' : 'pointer',
+                                        opacity: isFuture ? 0.4 : 1,
+                                        transition: 'all 0.2s',
+                                        fontSize: '0.85rem',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    {m}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                <div className="dashboard-table-container card">
+                    <div className="table-header-dash" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h3>Rentabilidad por Sede/Agenda ({months[selectedMonth]} {selectedYear})</h3>
+                        {saving && <span style={{ fontSize: '0.8rem', color: 'var(--primary)', animation: 'pulse 1s infinite' }}>⏳ Guardando cambios...</span>}
+                    </div>
+                    <div className="table-wrapper" style={{ padding: '20px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr style={{ borderBottom: '1px solid var(--glass-border)', textAlign: 'left' }}>
+                                    <th style={{ padding: '12px' }}>Agenda / Ciudad</th>
+                                    <th style={{ padding: '12px' }}>Inversión Ads</th>
+                                    <th style={{ padding: '12px' }}>Ventas Reales (COP)</th>
+                                    <th style={{ padding: '12px' }}>ROI</th>
+                                    <th style={{ padding: '12px' }}>Eficiencia % (Inv/Venta)</th>
+                                    <th style={{ padding: '12px' }}>Leads CRM (Agente)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {allAgendas.map(ag => {
+                                    const isGlobalRow = ag.id === -1;
+                                    const adsSpend = isGlobalRow ? globalTotals.adsSpend : (metaAggregated[ag.id] || 0);
+                                    const man = isGlobalRow ? globalTotals : (manualData.find(d => d.agenda_id === ag.id) || { agendados_cop: 0, leads_received: 0, agent_stats: {} });
+                                    const roi = adsSpend > 0 ? (man.agendados_cop / adsSpend).toFixed(2) : '0.00';
+
+                                    const target = adsSpend * 3;
+                                    const progress = Math.min((man.agendados_cop / (target || 1)) * 100, 100);
+
+                                    return (
+                                        <React.Fragment key={ag.id}>
+                                            <tr style={{
+                                                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                                                background: isGlobalRow ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
+                                                borderLeft: isGlobalRow ? '4px solid var(--primary)' : 'none'
+                                            }}>
+                                                <td style={{ padding: '12px' }}>
+                                                    <strong style={{ color: isGlobalRow ? 'var(--primary)' : 'inherit' }}>{ag.name}</strong>
+                                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                                        {isGlobalRow ? 'Suma automática de todas las sedes' : 'Sede / Servicio'}
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '12px', color: 'var(--text-muted)' }}>{formatCOP(adsSpend)}</td>
+                                                <td style={{ padding: '12px' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                                        {isEditing && !isGlobalRow ? (
+                                                            <input
+                                                                type="number"
+                                                                placeholder="$ 0"
+                                                                value={man.agendados_cop || ''}
+                                                                onChange={e => {
+                                                                    const val = parseFloat(e.target.value) || 0;
+                                                                    setManualData(prev => {
+                                                                        const existing = prev.find(d => d.agenda_id === ag.id);
+                                                                        if (existing) return prev.map(d => d.agenda_id === ag.id ? { ...d, agendados_cop: val } : d);
+                                                                        return [...prev, { agenda_id: ag.id, agendados_cop: val }];
+                                                                    });
+                                                                }}
+                                                                onBlur={e => handleSave(ag.id, 'agendados_cop', parseFloat(e.target.value) || 0)}
+                                                                style={{
+                                                                    background: '#ffffff', border: '2px solid var(--primary)', color: '#1a1a1a',
+                                                                    padding: '8px', borderRadius: '8px', width: '150px', fontWeight: 'bold', fontSize: '1rem'
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: isGlobalRow ? 'var(--primary)' : 'inherit' }}>
+                                                                {formatCOP(man.agendados_cop)}
+                                                            </span>
+                                                        )}
+                                                        <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+                                                            <div style={{ width: `${progress}%`, height: '100%', background: 'var(--primary)', transition: 'width 0.3s ease' }}></div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '12px' }}>
+                                                    <div style={{
+                                                        padding: '8px 12px', borderRadius: '8px',
+                                                        background: parseFloat(roi) > 3 ? 'rgba(46, 213, 115, 0.1)' : parseFloat(roi) > 1 ? 'rgba(255, 165, 2, 0.1)' : 'rgba(255, 71, 87, 0.1)',
+                                                        border: `1px solid ${parseFloat(roi) > 3 ? '#2ed573' : parseFloat(roi) > 1 ? '#ffa502' : '#ff4757'}`,
+                                                        textAlign: 'center', minWidth: '80px'
+                                                    }}>
+                                                        <span style={{ display: 'block', fontSize: '1.1rem', fontWeight: 'bold', color: parseFloat(roi) > 3 ? '#2ed573' : parseFloat(roi) > 1 ? '#ffa502' : '#ff4757' }}>
+                                                            {roi}x
+                                                        </span>
+                                                        <span style={{ fontSize: '0.6rem', textTransform: 'uppercase', opacity: 0.8 }}>ROI {isGlobalRow ? 'TOTAL' : ''}</span>
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '12px' }}>
+                                                    <div style={{
+                                                        padding: '8px 12px', borderRadius: '8px',
+                                                        background: 'rgba(255,255,255,0.03)',
+                                                        border: '1px solid var(--glass-border)',
+                                                        textAlign: 'center', minWidth: '80px'
+                                                    }}>
+                                                        <span style={{
+                                                            display: 'block', fontSize: '1.1rem', fontWeight: 'bold',
+                                                            color: man.agendados_cop > 0 ? 'var(--primary)' : 'var(--text-muted)'
+                                                        }}>
+                                                            {man.agendados_cop > 0 ? ((adsSpend / man.agendados_cop) * 100).toFixed(1) : '0'}%
+                                                        </span>
+                                                        <span style={{ fontSize: '0.6rem', textTransform: 'uppercase', opacity: 0.8 }}>Eficiencia %</span>
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '12px' }}>
+                                                    {isEditing && !isGlobalRow ? (
+                                                        <input
+                                                            type="number"
+                                                            placeholder="0 leads"
+                                                            value={man.leads_received || ''}
+                                                            onChange={e => {
+                                                                const val = parseInt(e.target.value) || 0;
+                                                                setManualData(prev => {
+                                                                    const existing = prev.find(d => d.agenda_id === ag.id);
+                                                                    if (existing) return prev.map(d => d.agenda_id === ag.id ? { ...d, leads_received: val } : d);
+                                                                    return [...prev, { agenda_id: ag.id, leads_received: val }];
+                                                                });
+                                                            }}
+                                                            onBlur={e => handleSave(ag.id, 'leads_received', parseInt(e.target.value) || 0)}
+                                                            style={{ background: '#ffffff', border: '1px solid #ced4da', color: '#1a1a1a', padding: '8px', borderRadius: '6px', width: '80px', fontWeight: '600' }}
+                                                        />
+                                                    ) : (
+                                                        <span style={{ fontWeight: '600', color: isGlobalRow ? 'var(--primary)' : 'inherit' }}>{man.leads_received || 0} Leads</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                            {/* Desempeño por Agente (Celdas anidadas) */}
+                                            <tr style={{ background: isGlobalRow ? 'rgba(var(--primary-rgb), 0.03)' : 'rgba(0,0,0,0.1)' }}>
+                                                <td colSpan="6" style={{ padding: '10px 10px 15px 40px' }}>
+                                                    <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                                        <span style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 'bold' }}>
+                                                            {isGlobalRow ? '👤 TOTAL AGENTES:' : '👤 AGENTES:'}
+                                                        </span>
+                                                        {allSellersWithGeneral.map(seller => {
+                                                            const sName = seller.full_name || seller.username;
+                                                            const sData = man.agent_stats?.[sName] || { sales: 0, leads: 0 };
+
+                                                            return (
+                                                                <div key={sName} style={{
+                                                                    display: 'flex', gap: '5px', alignItems: 'center',
+                                                                    background: isGlobalRow ? 'rgba(var(--primary-rgb), 0.1)' : 'rgba(255,255,255,0.03)',
+                                                                    padding: '4px 10px',
+                                                                    borderRadius: '15px', border: '1px solid var(--glass-border)'
+                                                                }}>
+                                                                    <span style={{ fontSize: '0.75rem' }}>{sName}:</span>
+                                                                    {isEditing && !isGlobalRow ? (
+                                                                        <>
+                                                                            <input
+                                                                                type="number" placeholder="$"
+                                                                                value={sData.sales || ''}
+                                                                                onChange={e => {
+                                                                                    const val = parseFloat(e.target.value) || 0;
+                                                                                    const nextStats = { ...man.agent_stats, [sName]: { ...sData, sales: val } };
+                                                                                    setManualData(prev => prev.map(d => d.agenda_id === ag.id ? { ...d, agent_stats: nextStats } : d));
+                                                                                }}
+                                                                                onBlur={e => handleSave(ag.id, 'agent_stats', { ...man.agent_stats, [sName]: { ...sData, sales: parseFloat(e.target.value) || 0 } })}
+                                                                                style={{ background: '#ffffff', border: '1px solid var(--primary)', color: '#1a1a1a', width: '80px', fontSize: '0.7rem', borderRadius: '4px', padding: '2px', textAlign: 'center' }}
+                                                                            />
+                                                                            <input
+                                                                                type="number" placeholder="L"
+                                                                                value={sData.leads || ''}
+                                                                                onChange={e => {
+                                                                                    const val = parseInt(e.target.value) || 0;
+                                                                                    const nextStats = { ...man.agent_stats, [sName]: { ...sData, leads: val } };
+                                                                                    setManualData(prev => prev.map(d => d.agenda_id === ag.id ? { ...d, agent_stats: nextStats } : d));
+                                                                                }}
+                                                                                onBlur={e => handleSave(ag.id, 'agent_stats', { ...man.agent_stats, [sName]: { ...sData, leads: parseInt(e.target.value) || 0 } })}
+                                                                                style={{ background: '#f0f0f0', border: '1px solid #ccc', color: '#333', width: '40px', fontSize: '0.75rem', borderRadius: '4px', padding: '2px', textAlign: 'center' }}
+                                                                            />
+                                                                        </>
+                                                                    ) : (
+                                                                        <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                                                                            {formatCOP(sData.sales)} ({sData.leads || 0}L)
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -564,7 +1126,21 @@ const AgentDashboard = ({ user }) => {
                         cursor: 'pointer'
                     }}
                 >
-                    📱 Rendimiento Meta Ads
+                    📱 Rendimiento Ads
+                </button>
+                <button
+                    className={`btn-tab ${view === 'profit' ? 'active' : ''}`}
+                    onClick={() => setView('profit')}
+                    style={{
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--glass-border)',
+                        background: view === 'profit' ? 'var(--primary)' : 'transparent',
+                        color: 'white',
+                        cursor: 'pointer'
+                    }}
+                >
+                    💹 Rentabilidad REAL
                 </button>
             </div>
 
@@ -696,8 +1272,10 @@ const AgentDashboard = ({ user }) => {
                         </div>
                     </div>
                 </>
-            ) : (
+            ) : view === 'meta' ? (
                 <MetaAdsView />
+            ) : (
+                <ConsolidatedView />
             )}
 
             {showDetail && (
