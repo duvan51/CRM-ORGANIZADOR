@@ -1511,7 +1511,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             return <span style={{ color: 'var(--primary)', marginLeft: '4px' }}>{metaSortConfig.direction === 'desc' ? '▼' : '▲'}</span>;
         };
 
-        // Calcular Totales Filtrados con Lógica de Adsets e Herencia
+        // Calcular Totales Filtrados con Lógica de Adsets e Herencia (Concordancia Universal)
         const baseFiltered = (() => {
             const adsets = metaCampaigns.filter(s => s.entity_type === 'adset');
             const campaigns = metaCampaigns.filter(s => s.entity_type === 'campaign');
@@ -1525,17 +1525,20 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             };
 
             const matchesGeneralFilters = (c) => {
-                const matchesStatus = metaStatusFilter === 'ALL' || c.status === metaStatusFilter;
+                const matchesStatus = metaStatusFilter === 'ALL' ||
+                    c.status === metaStatusFilter ||
+                    (metaStatusFilter === 'ACTIVE' && parseFloat(c.spend || 0) > 0);
                 const matchesAccount = metaAccountFilter === 'ALL' || (Array.isArray(metaAccountFilter) && metaAccountFilter.includes(c.ad_account_id));
                 return matchesStatus && matchesAccount;
             };
 
+            let filteredAdsets = [];
             if (metaAgendaFilter === 'ALL') {
-                return campaigns.filter(matchesGeneralFilters);
+                filteredAdsets = adsets.filter(matchesGeneralFilters);
+            } else {
+                const targetId = parseInt(metaAgendaFilter);
+                filteredAdsets = adsets.filter(a => getAgendaForAdset(a) === targetId && matchesGeneralFilters(a));
             }
-
-            const targetId = parseInt(metaAgendaFilter);
-            const filteredAdsets = adsets.filter(a => getAgendaForAdset(a) === targetId && matchesGeneralFilters(a));
 
             const resolvedCampsMap = {};
             filteredAdsets.forEach(a => {
@@ -1558,13 +1561,25 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 resolvedCampsMap[pId].conversations_count += parseInt(a.conversations_count || 0);
             });
 
-            // Incluir campañas mapeadas directamente pero con filtros generales
-            metaMappings.filter(m => m.agenda_id === targetId).forEach(m => {
-                const camp = campaigns.find(c => c.campaign_id === m.meta_entity_id);
-                if (camp && !resolvedCampsMap[camp.campaign_id] && matchesGeneralFilters(camp)) {
-                    resolvedCampsMap[camp.campaign_id] = { ...camp };
-                }
-            });
+            // Incluir campañas mapeadas directamente o que no se reconstruyeron pero pasan filtros
+            if (metaAgendaFilter !== 'ALL') {
+                const targetId = parseInt(metaAgendaFilter);
+                metaMappings.filter(m => m.agenda_id === targetId).forEach(m => {
+                    const camp = campaigns.find(c => c.campaign_id === m.meta_entity_id);
+                    if (camp && !resolvedCampsMap[camp.campaign_id] && matchesGeneralFilters(camp)) {
+                        resolvedCampsMap[camp.campaign_id] = { ...camp };
+                    }
+                });
+            } else {
+                campaigns.filter(matchesGeneralFilters).forEach(c => {
+                    if (!resolvedCampsMap[c.campaign_id]) {
+                        const hasAdsets = adsets.some(a => a.parent_id === c.campaign_id);
+                        if (!hasAdsets) {
+                            resolvedCampsMap[c.campaign_id] = { ...c };
+                        }
+                    }
+                });
+            }
 
             return Object.values(resolvedCampsMap);
         })();
@@ -2130,29 +2145,30 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
     return (
         <div className="admin-panel-premium">
+            <button className="admin-close-modal-fixed" onClick={onBack} title="Cerrar Panel">×</button>
             <div className="admin-sidebar">
                 <div className="sidebar-logo">
                     <h2>CRM Admin</h2>
                     <span>v2.1 Full Access</span>
                 </div>
                 <nav>
-                    <button className={activeView === "agendas" ? "active" : ""} onClick={() => setActiveView("agendas")}>📅 Agendas</button>
-                    <button className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}>👥 Personal</button>
-                    <button className={activeView === "bloqueos" ? "active" : ""} onClick={() => setActiveView("bloqueos")}>🚫 Bloqueos</button>
-                    <button className={activeView === "alertas" ? "active" : ""} onClick={() => setActiveView("alertas")}>🔔 Alertas</button>
+                    <button className={activeView === "agendas" ? "active" : ""} onClick={() => setActiveView("agendas")}>📅 <span className="sidebar-text">Agendas</span></button>
+                    <button className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}>👥 <span className="sidebar-text">Personal</span></button>
+                    <button className={activeView === "bloqueos" ? "active" : ""} onClick={() => setActiveView("bloqueos")}>🚫 <span className="sidebar-text">Bloqueos</span></button>
+                    <button className={activeView === "alertas" ? "active" : ""} onClick={() => setActiveView("alertas")}>🔔 <span className="sidebar-text">Alertas</span></button>
                     {(userRole === "superuser" || userRole === "admin" || userRole === "owner") && (
                         <>
-                            <button className={activeView === "servicios" ? "active" : ""} onClick={() => setActiveView("servicios")}>🛒 Servicios</button>
-                            <button className={activeView === "horarios" ? "active" : ""} onClick={() => setActiveView("horarios")}>🕒 Horarios</button>
+                            <button className={activeView === "servicios" ? "active" : ""} onClick={() => setActiveView("servicios")}>🛒 <span className="sidebar-text">Servicios</span></button>
+                            <button className={activeView === "horarios" ? "active" : ""} onClick={() => setActiveView("horarios")}>🕒 <span className="sidebar-text">Horarios</span></button>
                             {(userRole === "superuser" || userRole === "owner") && (
                                 <>
-                                    <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 SMS Automatizados</button>
-                                    <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 Email Automatizados</button>
-                                    <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 Meta Ads</button>
+                                    <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 <span className="sidebar-text">SMS Automatizados</span></button>
+                                    <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 <span className="sidebar-text">Email Automatizados</span></button>
+                                    <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
                                 </>
                             )}
-                            <button className={activeView === "logs" ? "active" : ""} onClick={() => { setActiveView("logs"); fetchGlobalLogs(); }}>📜 Monitoreo</button>
-                            <button className={activeView === "superconfig" ? "active" : ""} onClick={() => setActiveView("superconfig")}>⚙️ Superconfiguración</button>
+                            <button className={activeView === "logs" ? "active" : ""} onClick={() => { setActiveView("logs"); fetchGlobalLogs(); }}>📜 <span className="sidebar-text">Monitoreo</span></button>
+                            <button className={activeView === "superconfig" ? "active" : ""} onClick={() => setActiveView("superconfig")}>⚙️ <span className="sidebar-text">Superconfiguración</span></button>
                         </>
                     )}
                 </nav>

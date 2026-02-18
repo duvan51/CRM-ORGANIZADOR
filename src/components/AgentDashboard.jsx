@@ -471,49 +471,59 @@ const AgentDashboard = ({ user }) => {
             let filteredAdsets = [];
 
             if (selectedAgendaId === "Todas") {
-                campsData = camps;
                 filteredAdsets = asets;
             } else {
                 const targetId = parseInt(selectedAgendaId);
-
                 // Filtrar Adsets que pertenecen a esta agenda (por mapeo directo o herencia)
                 filteredAdsets = asets.filter(a => getAgendaForAdset(a) === targetId);
+            }
 
-                // Construir campañas basadas ÚNICAMENTE en los adsets filtrados (Concordancia Real)
-                const resolvedCampsMap = {};
-                filteredAdsets.forEach(a => {
-                    const pId = a.parent_id;
-                    if (!pId) return;
+            // Construir campañas basadas ÚNICAMENTE en los adsets filtrados (Concordancia Real Universal)
+            const resolvedCampsMap = {};
+            filteredAdsets.forEach(a => {
+                const pId = a.parent_id;
+                if (!pId) return;
 
-                    if (!resolvedCampsMap[pId]) {
-                        const baseCamp = camps.find(c => c.campaign_id === pId);
-                        if (baseCamp) {
-                            resolvedCampsMap[pId] = { ...baseCamp, spend: 0, clicks: 0, impressions: 0, leads_count: 0 };
-                        } else {
-                            resolvedCampsMap[pId] = {
-                                campaign_id: pId,
-                                campaign_name: "Campaña (Detalle)",
-                                entity_type: 'campaign',
-                                spend: 0, clicks: 0, impressions: 0, leads_count: 0
-                            };
-                        }
+                if (!resolvedCampsMap[pId]) {
+                    const baseCamp = camps.find(c => c.campaign_id === pId);
+                    if (baseCamp) {
+                        resolvedCampsMap[pId] = { ...baseCamp, spend: 0, clicks: 0, impressions: 0, leads_count: 0 };
+                    } else {
+                        resolvedCampsMap[pId] = {
+                            campaign_id: pId,
+                            campaign_name: "Campaña (Detalle)",
+                            entity_type: 'campaign',
+                            spend: 0, clicks: 0, impressions: 0, leads_count: 0
+                        };
                     }
-                    resolvedCampsMap[pId].spend += a.spend;
-                    resolvedCampsMap[pId].clicks += a.clicks;
-                    resolvedCampsMap[pId].impressions += a.impressions;
-                    resolvedCampsMap[pId].leads_count += a.leads_count;
-                });
+                }
+                resolvedCampsMap[pId].spend += a.spend;
+                resolvedCampsMap[pId].clicks += a.clicks;
+                resolvedCampsMap[pId].impressions += a.impressions;
+                resolvedCampsMap[pId].leads_count += a.leads_count;
+            });
 
-                // Incluir campañas que estén mapeadas directamente aunque no tengan adsets en los datos
+            // Incluir pautas mapeadas directamente que no tengan adset con gasto pero deban verse
+            if (selectedAgendaId !== "Todas") {
+                const targetId = parseInt(selectedAgendaId);
                 mappings.filter(m => m.agenda_id === targetId).forEach(m => {
                     const camp = camps.find(c => c.campaign_id === m.meta_entity_id);
                     if (camp && !resolvedCampsMap[camp.campaign_id]) {
                         resolvedCampsMap[camp.campaign_id] = { ...camp };
                     }
                 });
-
-                campsData = Object.values(resolvedCampsMap);
+            } else {
+                camps.forEach(c => {
+                    if (!resolvedCampsMap[c.campaign_id]) {
+                        const hasAdsets = asets.some(a => a.parent_id === c.campaign_id);
+                        if (!hasAdsets) {
+                            resolvedCampsMap[c.campaign_id] = { ...c };
+                        }
+                    }
+                });
             }
+
+            campsData = Object.values(resolvedCampsMap);
 
             // APLICAR ORDENAMIENTO
             const sortData = (data) => {
@@ -850,24 +860,59 @@ const AgentDashboard = ({ user }) => {
 
         return (
             <div className="consolidated-view animate-in">
-                <div className="dashboard-controls card" style={{ marginBottom: '20px', padding: '20px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                        <div className="year-selector" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                            <label style={{ fontWeight: 'bold' }}>Año:</label>
+                <div className="dashboard-controls card" style={{ marginBottom: '20px', padding: '25px', background: 'rgba(var(--primary-rgb), 0.03)', border: '1px solid var(--glass-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <div className="year-selector-premium" style={{
+                            display: 'flex',
+                            gap: '15px',
+                            alignItems: 'center',
+                            background: 'var(--card-bg)',
+                            padding: '8px 20px',
+                            borderRadius: '16px',
+                            border: '1px solid var(--glass-border)',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.03)'
+                        }}>
+                            <label style={{ fontWeight: '700', fontSize: '0.9rem', color: 'var(--text-main)', opacity: 0.8 }}>Año Fiscal</label>
                             <select
                                 value={selectedYear}
                                 onChange={e => handleMonthYearChange(selectedMonth, parseInt(e.target.value))}
-                                style={{ background: 'var(--primary)', color: 'white', borderRadius: '8px', padding: '5px 15px', border: 'none' }}
+                                style={{
+                                    background: 'var(--primary)',
+                                    color: 'white',
+                                    borderRadius: '10px',
+                                    padding: '6px 18px',
+                                    border: 'none',
+                                    fontWeight: '700',
+                                    fontSize: '0.9rem',
+                                    cursor: 'pointer',
+                                    outline: 'none',
+                                    boxShadow: '0 2px 8px rgba(var(--primary-rgb), 0.3)'
+                                }}
                             >
                                 {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
                             </select>
                         </div>
+
+                        <div style={{ flex: 1 }}></div>
+
                         <button
                             className={`btn-${isEditing ? 'success' : 'primary'}`}
                             onClick={() => setIsEditing(!isEditing)}
-                            style={{ padding: '8px 20px', borderRadius: '20px', display: 'flex', gap: '8px', alignItems: 'center' }}
+                            style={{
+                                padding: '10px 25px',
+                                borderRadius: '25px',
+                                display: 'flex',
+                                gap: '10px',
+                                alignItems: 'center',
+                                fontWeight: '700',
+                                fontSize: '0.95rem',
+                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                boxShadow: isEditing ? '0 10px 20px rgba(16, 185, 129, 0.3)' : '0 10px 20px rgba(99, 102, 241, 0.3)',
+                                border: '1px solid rgba(255,255,255,0.1)'
+                            }}
                         >
-                            {isEditing ? '🔒 Finalizar Edición' : '🔓 Editar Datos'}
+                            <span style={{ fontSize: '1.2rem' }}>{isEditing ? '🔒' : '🔓'}</span>
+                            {isEditing ? 'Finalizar Edición' : 'Editar Datos'}
                         </button>
                     </div>
 
@@ -1108,7 +1153,7 @@ const AgentDashboard = ({ user }) => {
                         borderRadius: '8px',
                         border: '1px solid var(--glass-border)',
                         background: view === 'general' ? 'var(--primary)' : 'transparent',
-                        color: 'white',
+                        color: view === 'general' ? 'white' : 'var(--text-main)',
                         cursor: 'pointer'
                     }}
                 >
@@ -1122,7 +1167,7 @@ const AgentDashboard = ({ user }) => {
                         borderRadius: '8px',
                         border: '1px solid var(--glass-border)',
                         background: view === 'meta' ? 'var(--primary)' : 'transparent',
-                        color: 'white',
+                        color: view === 'meta' ? 'white' : 'var(--text-main)',
                         cursor: 'pointer'
                     }}
                 >
@@ -1136,7 +1181,7 @@ const AgentDashboard = ({ user }) => {
                         borderRadius: '8px',
                         border: '1px solid var(--glass-border)',
                         background: view === 'profit' ? 'var(--primary)' : 'transparent',
-                        color: 'white',
+                        color: view === 'profit' ? 'white' : 'var(--text-main)',
                         cursor: 'pointer'
                     }}
                 >
