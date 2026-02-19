@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { createClient } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 import ConfirmModal from "./ConfirmModal";
+import AiAgentSection from "./AiAgentSection";
 
 const AdminPanel = ({ token, onBack, userRole }) => {
     console.log("AdminPanel Mount - Role:", userRole);
@@ -67,7 +69,20 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [showUserModal, setShowUserModal] = useState(false);
     const [showServiceModal, setShowServiceModal] = useState(null); // stores service object for editing
     const [editingAgenda, setEditingAgenda] = useState({ name: "", description: "", slots_per_hour: 1 });
-    const [editingService, setEditingService] = useState({ nombre: "", precio_base: 0, duracion_minutos: 30, concurrency: 1, total_sesiones: 1, color: "#3b82f6", image_url: "", descripcion: "" });
+    const [editingService, setEditingService] = useState({
+        nombre: "",
+        precio_base: 0,
+        precio_descuento: 0,
+        duracion_minutos: 30,
+        concurrency: 1,
+        total_sesiones: 1,
+        color: "#3b82f6",
+        image_url: "",
+        descripcion: "",
+        parent_id: null,
+        es_paquete: false,
+        informacion_ia: ""
+    });
 
     const [newAgenda, setNewAgenda] = useState({ name: "", description: "", slots_per_hour: 1 });
     const [newUser, setNewUser] = useState({
@@ -560,12 +575,16 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 nombre: editingService.nombre,
                 descripcion: editingService.descripcion,
                 precio_base: parseFloat(editingService.precio_base),
+                precio_descuento: parseFloat(editingService.precio_descuento || 0),
                 duracion_minutos: parseInt(editingService.duracion_minutos),
                 concurrency: parseInt(editingService.concurrency),
                 total_sesiones: parseInt(editingService.total_sesiones || 1),
                 color: editingService.color,
                 image_url: editingService.image_url,
-                clinic_id: currentClinicId // Assign to current clinic
+                clinic_id: currentClinicId,
+                parent_id: editingService.parent_id === "" || editingService.parent_id === null ? null : parseInt(editingService.parent_id),
+                es_paquete: editingService.es_paquete,
+                informacion_ia: editingService.informacion_ia
             };
 
             let serviceId = showServiceModal.id;
@@ -1031,57 +1050,128 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 <div className="service-premium-grid">
                     {globalServices
                         .filter(s => {
+                            // Mostrar solo productos base aquí (que no tienen padre)
+                            if (s.parent_id) return false;
+
                             if ((userRole === "superuser" || userRole === "owner")) return true;
                             // Para admin, mostrar solo si el servicio está en alguna de sus agendas
                             return allAgendaServices.some(as => as.service_id === s.id && agendas.some(ag => ag.id === as.agenda_id));
                         })
-                        .map(s => (
-                            <div key={s.id} className="service-card-v2" style={{ borderTop: `4px solid ${s.color || 'var(--primary)'}` }}>
-                                {s.image_url && (
-                                    <div className="service-card-img" style={{ backgroundImage: `url(${s.image_url})` }}></div>
-                                )}
-                                <div className="service-card-body">
-                                    <div className="service-title-row">
-                                        <h5>{s.nombre}</h5>
-                                        <span className="price-tag">${s.precio_base.toLocaleString()}</span>
+                        .map(s => {
+                            const packages = globalServices.filter(p => p.parent_id === s.id);
+
+                            return (
+                                <div key={s.id} className="service-group-container" style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                    <div className="service-card-v2 base-product" style={{ borderTop: `4px solid ${s.color || 'var(--primary)'}` }}>
+                                        {s.image_url && (
+                                            <div className="service-card-img" style={{ backgroundImage: `url(${s.image_url})` }}></div>
+                                        )}
+                                        <div className="service-card-body">
+                                            <div className="service-title-row">
+                                                <h5>{s.nombre} {s.es_paquete && <span className="package-badge">📦 Paquete</span>}</h5>
+                                                <span className="price-tag">${s.precio_base.toLocaleString()}</span>
+                                            </div>
+                                            <p className="service-desc">{s.descripcion || "Sin descripción proporcionada."}</p>
+                                            <div className="service-meta">
+                                                <span>⏱️ {s.duracion_minutos} min</span>
+                                                <span>👥 {s.concurrency > 1 ? `${s.concurrency} cupos` : '1 cupo'}</span>
+                                            </div>
+                                            {(userRole === "superuser" || userRole === "owner") && (
+                                                <div className="service-actions">
+                                                    <button className="btn-edit-v2" onClick={() => {
+                                                        setEditingService({
+                                                            nombre: s.nombre,
+                                                            precio_base: s.precio_base,
+                                                            duracion_minutos: s.duracion_minutos,
+                                                            concurrency: s.concurrency || 1,
+                                                            total_sesiones: s.total_sesiones || 1,
+                                                            color: s.color || "#3b82f6",
+                                                            image_url: s.image_url || "",
+                                                            descripcion: s.descripcion || "",
+                                                            parent_id: s.parent_id,
+                                                            es_paquete: s.es_paquete || false,
+                                                            informacion_ia: s.informacion_ia || ""
+                                                        });
+                                                        setShowServiceModal(s);
+                                                    }}>✏️ Editar</button>
+                                                    <button className="btn-delete-v2" onClick={() => {
+                                                        setConfirmModal({
+                                                            isOpen: true,
+                                                            title: "Eliminar del Catálogo",
+                                                            message: "¿Estás seguro de eliminar este servicio del catálogo maestro? Se desvinculará de TODAS las agendas.",
+                                                            icon: "📦",
+                                                            type: "danger",
+                                                            onConfirm: async () => {
+                                                                const { error } = await supabase.from('global_services').delete().eq('id', s.id);
+                                                                if (!error) fetchData();
+                                                            }
+                                                        });
+                                                    }}>🗑️</button>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                    <p className="service-desc">{s.descripcion || "Sin descripción proporcionada."}</p>
-                                    <div className="service-meta">
-                                        <span>⏱️ {s.duracion_minutos} min</span>
-                                        <span>👥 {s.concurrency > 1 ? `${s.concurrency} cupos` : '1 cupo'}</span>
-                                    </div>
-                                    {(userRole === "superuser" || userRole === "owner") && (
-                                        <div className="service-actions">
-                                            <button className="btn-edit-v2" onClick={() => {
-                                                setEditingService({
-                                                    nombre: s.nombre,
-                                                    precio_base: s.precio_base,
-                                                    duracion_minutos: s.duracion_minutos,
-                                                    concurrency: s.concurrency || 1,
-                                                    color: s.color || "#3b82f6",
-                                                    image_url: s.image_url || "",
-                                                    descripcion: s.descripcion || ""
-                                                });
-                                                setShowServiceModal(s);
-                                            }}>✏️ Editar</button>
-                                            <button className="btn-delete-v2" onClick={() => {
-                                                setConfirmModal({
-                                                    isOpen: true,
-                                                    title: "Eliminar del Catálogo",
-                                                    message: "¿Estás seguro de eliminar este servicio del catálogo maestro? Se desvinculará de TODAS las agendas.",
-                                                    icon: "📦",
-                                                    type: "danger",
-                                                    onConfirm: async () => {
-                                                        const { error } = await supabase.from('global_services').delete().eq('id', s.id);
-                                                        if (!error) fetchData();
-                                                    }
-                                                });
-                                            }}>🗑️</button>
+
+                                    {packages.length > 0 && (
+                                        <div className="nested-packages" style={{ paddingLeft: '40px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                            {packages.map(p => (
+                                                <div key={p.id} className="service-card-v2 package-variant" style={{ borderLeft: `4px solid ${s.color || 'var(--primary)'}`, background: 'rgba(255,255,255,0.01)' }}>
+                                                    <div className="service-card-body" style={{ padding: '10px 15px' }}>
+                                                        <div className="service-title-row" style={{ marginBottom: '5px' }}>
+                                                            <h6 style={{ margin: 0 }}>📦 {p.nombre}</h6>
+                                                            <span className="price-tag" style={{ fontSize: '0.9rem' }}>${p.precio_base.toLocaleString()}</span>
+                                                        </div>
+                                                        <div className="service-meta" style={{ fontSize: '0.75rem', marginBottom: '8px' }}>
+                                                            <span>📅 {p.total_sesiones} sesiones</span>
+                                                            <span style={{ opacity: 0.6 }}>{p.duracion_minutos} min</span>
+                                                        </div>
+                                                        {(userRole === "superuser" || userRole === "owner") && (
+                                                            <div className="service-actions" style={{ justifyContent: 'flex-end', gap: '5px' }}>
+                                                                <button className="btn-edit-v2" style={{ padding: '4px 8px', fontSize: '0.7rem' }} onClick={() => {
+                                                                    setEditingService({
+                                                                        nombre: p.nombre,
+                                                                        precio_base: p.precio_base,
+                                                                        duracion_minutos: p.duracion_minutos,
+                                                                        concurrency: p.concurrency || 1,
+                                                                        total_sesiones: p.total_sesiones || 1,
+                                                                        color: p.color || s.color || "#3b82f6",
+                                                                        image_url: p.image_url || "",
+                                                                        descripcion: p.descripcion || "",
+                                                                        parent_id: p.parent_id,
+                                                                        es_paquete: p.es_paquete || false,
+                                                                        informacion_ia: p.informacion_ia || ""
+                                                                    });
+                                                                    setShowServiceModal(p);
+                                                                }}>✏️</button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
                                     )}
                                 </div>
+                            );
+                        })}
+
+                    {/* Sección para paquetes huérfanos o sin padre (por si acaso) */}
+                    {globalServices
+                        .filter(s => s.parent_id && !globalServices.some(p => p.id === s.parent_id))
+                        .map(s => (
+                            <div key={s.id} className="service-card-v2 orphan-package" style={{ borderTop: `4px solid #94a3b8`, opacity: 0.7 }}>
+                                <div className="service-card-body">
+                                    <div className="service-title-row">
+                                        <h5>📦 {s.nombre} (Huerfano)</h5>
+                                        <span className="price-tag">${s.precio_base.toLocaleString()}</span>
+                                    </div>
+                                    <button className="btn-edit-v2" onClick={() => {
+                                        setEditingService({ ...s, informacion_ia: s.informacion_ia || "" });
+                                        setShowServiceModal(s);
+                                    }}>✏️ Re-vincular</button>
+                                </div>
                             </div>
-                        ))}
+                        ))
+                    }
                 </div>
             </div>
         </div>
@@ -2164,6 +2254,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 <>
                                     <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 <span className="sidebar-text">SMS Automatizados</span></button>
                                     <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 <span className="sidebar-text">Email Automatizados</span></button>
+                                    <button className={activeView === "ai_agent" ? "active" : ""} onClick={() => setActiveView("ai_agent")}>🤖 <span className="sidebar-text">Agente IA</span></button>
                                     <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
                                 </>
                             )}
@@ -2185,6 +2276,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "horarios" && renderConfigHorarios()}
                     {activeView === "sms" && renderSMS()}
                     {activeView === "email" && renderEmail()}
+                    {activeView === "ai_agent" && <AiAgentSection clinicId={clinicId} />}
                     {activeView === "meta" && renderMetaConfig()}
                     {activeView === "logs" && renderLogs()}
                     {activeView === "superconfig" && renderSuperConfig()}
@@ -2192,7 +2284,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             </main>
 
             {/* MODAL: META SETUP GUIDE */}
-            {showMetaGuide && (
+            {showMetaGuide && createPortal(
                 <div className="modal-overlay" onClick={() => setShowMetaGuide(false)}>
                     <div className="modal-content premium-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--glass-border)', paddingBottom: '15px' }}>
@@ -2240,12 +2332,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             <button className="btn-process" onClick={() => setShowMetaGuide(false)}>¡Entendido, ir a configurar!</button>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
-            {/* MODAL: MANAGE AGENTS */}
             {/* Service Hour Modal */}
-            {showServiceHoursModal && (
+            {showServiceHoursModal && createPortal(
                 <div className="modal-overlay">
                     <div className="modal-content" style={{ maxWidth: "500px" }}>
                         <h3>Horarios: {showServiceHoursModal.service_name}</h3>
@@ -2291,11 +2383,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             }}>Cerrar</button>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
             {/* Existing Modals */}
-            {showAgentModal && (
+            {showAgentModal && createPortal(
                 <div className="modal-overlay">
                     <div className="modal-content premium-modal">
                         <h3>Gestionar Agentes: {showAgentModal.name}</h3>
@@ -2323,11 +2416,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             <button className="btn-secondary" onClick={() => setShowAgentModal(null)}>Cerrar</button>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
             {/* MODAL: EDIT/NEW AGENDA */}
-            {showEditAgenda && (
+            {showEditAgenda && createPortal(
                 <div className="modal-overlay">
                     <div className="modal-content premium-modal">
                         <h3>{showEditAgenda.id === 'new' ? 'Nueva Agenda' : 'Editar Agenda'}</h3>
@@ -2369,11 +2463,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             </div>
                         </form>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
             {/* MODAL: NEW USER */}
-            {showUserModal && (
+            {showUserModal && createPortal(
                 <div className="modal-overlay">
                     <div className="modal-content premium-modal">
                         <h3>Crear Nuevo Usuario</h3>
@@ -2416,11 +2511,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             </div>
                         </form>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
             {/* MODAL: DUPLICATE SCHEDULE */}
-            {duplicateHorario && (
+            {duplicateHorario && createPortal(
                 <div className="modal-overlay">
                     <div className="modal-content premium-modal" style={{ maxWidth: '450px' }}>
                         <h3>Duplicar Horario</h3>
@@ -2470,11 +2566,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             </div>
                         </form>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
             {/* MODAL: EDIT/NEW GLOBAL SERVICE */}
-            {showServiceModal && (
+            {showServiceModal && createPortal(
                 <div className="modal-overlay">
                     <div className="modal-content premium-modal full-screen-modal">
                         <h3>{showServiceModal.id === 'new' ? 'Nuevo Servicio Global' : `Editar: ${showServiceModal.nombre}`}</h3>
@@ -2506,6 +2603,14 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         value={editingService.precio_base}
                                         onChange={e => setEditingService({ ...editingService, precio_base: e.target.value })}
                                         required
+                                    />
+                                </div>
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label>Precio Descuento $</label>
+                                    <input
+                                        type="number"
+                                        value={editingService.precio_descuento}
+                                        onChange={e => setEditingService({ ...editingService, precio_descuento: e.target.value })}
                                     />
                                 </div>
                                 <div className="form-group" style={{ flex: 1 }}>
@@ -2553,13 +2658,73 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <div className="img-preview-tiny" style={{ backgroundImage: `url(${editingService.image_url})` }}></div>
                                 )}
                             </div>
+
+                            <div style={{ display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '15px', padding: '15px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                                <label className="checkbox-item" style={{ margin: 0 }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={editingService.es_paquete}
+                                        onChange={e => setEditingService({ ...editingService, es_paquete: e.target.checked })}
+                                    />
+                                    <span>Es un Paquete / Promoción</span>
+                                </label>
+
+                                {editingService.es_paquete && (
+                                    <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                                        <select
+                                            value={editingService.parent_id || ""}
+                                            onChange={e => {
+                                                const parentId = e.target.value;
+                                                const parent = globalServices.find(gs => gs.id === parseInt(parentId));
+                                                if (parent) {
+                                                    setEditingService({
+                                                        ...editingService,
+                                                        parent_id: parentId,
+                                                        descripcion: parent.descripcion || editingService.descripcion,
+                                                        concurrency: parent.concurrency || editingService.concurrency,
+                                                        informacion_ia: parent.informacion_ia || editingService.informacion_ia
+                                                    });
+                                                } else {
+                                                    setEditingService({ ...editingService, parent_id: parentId });
+                                                }
+                                            }}
+                                            className="custom-file-input"
+                                            style={{ margin: 0 }}
+                                        >
+                                            <option value="">-- Seleccionar Producto Base --</option>
+                                            {globalServices
+                                                .filter(gs => !gs.es_paquete && gs.id !== showServiceModal.id)
+                                                .map(gs => <option key={gs.id} value={gs.id}>{gs.nombre}</option>)}
+                                        </select>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="form-group">
+                                <label style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    🧠 Información Experta para la IA
+                                </label>
+                                <textarea
+                                    value={editingService.informacion_ia}
+                                    onChange={e => setEditingService({ ...editingService, informacion_ia: e.target.value })}
+                                    placeholder="Ingresa detalles que la IA debe conocer: Beneficios, ingredientes, contraindicaciones, por qué es mejor que la competencia, etc."
+                                    rows="5"
+                                    style={{ border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb), 0.05)' }}
+                                />
+                                <small className="text-muted">Esta información será usada por el agente para responder preguntas técnicas de los pacientes.</small>
+                            </div>
+
                             <div className="form-group">
                                 <label>Color Distintivo</label>
-                                <input
-                                    type="color"
-                                    value={editingService.color}
-                                    onChange={e => setEditingService({ ...editingService, color: e.target.value })}
-                                />
+                                <div className="color-picker-container">
+                                    <input
+                                        type="color"
+                                        value={editingService.color}
+                                        className="service-color-input"
+                                        onChange={e => setEditingService({ ...editingService, color: e.target.value })}
+                                    />
+                                    <span className="color-value-text">{editingService.color}</span>
+                                </div>
                             </div>
 
                             {showServiceModal.id === 'new' && (
@@ -2580,13 +2745,14 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 </div>
                             )}
 
-                            <div className="modal-footer">
-                                <button type="button" className="btn-secondary" onClick={() => setShowServiceModal(null)}>Cancelar</button>
+                            <div className="modal-footer footer-between">
+                                <button type="button" className="btn-secondary btn-cancel-service" onClick={() => setShowServiceModal(null)}>Cancelar</button>
                                 <button type="submit" className="btn-process">{showServiceModal.id === 'new' ? 'Crear Servicio' : 'Guardar Cambios'}</button>
                             </div>
                         </form>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
             <ConfirmModal

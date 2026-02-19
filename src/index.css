@@ -3275,10 +3275,10 @@ tr:hover td {
 }
 
 .modal-content.full-screen-modal {
-  width: 95vw !important;
+  width: 98vw !important;
+  max-width: 1400px !important;
   height: 95vh !important;
-  max-width: none !important;
-  max-height: none !important;
+  margin: 2.5vh auto;
   border-radius: 24px;
   padding: 30px;
   display: flex;
@@ -3296,13 +3296,71 @@ tr:hover td {
 }
 
 .assign-checkboxes-modal {
-  max-height: 250px;
-  overflow-y: auto;
+  max-height: 400px;
+  margin-top: 20px;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 16px;
   border: 1px solid var(--glass-border);
-  padding: 15px;
+}
+
+.footer-between {
+  display: flex;
+  justify-content: space-between !important;
+  align-items: center;
+  gap: 20px;
+}
+
+.btn-cancel-service {
+  background: #ff4d4d !important;
+  color: white !important;
+  border: none !important;
+  box-shadow: 0 4px 12px rgba(255, 77, 77, 0.3) !important;
+}
+
+.btn-cancel-service:hover {
+  background: #ff3333 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(255, 77, 77, 0.4) !important;
+}
+
+.color-picker-container {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px;
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.1);
-  margin-top: 15px;
+  border: 1px solid var(--glass-border);
+}
+
+.service-color-input {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  width: 50px !important;
+  height: 50px !important;
+  background-color: transparent;
+  border: none !important;
+  cursor: pointer;
+  padding: 0 !important;
+}
+
+.service-color-input::-webkit-color-swatch {
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.service-color-input::-moz-color-swatch {
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.color-value-text {
+  font-family: monospace;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
 }
 
 /* --- Patient Suggestions Dropdown --- */

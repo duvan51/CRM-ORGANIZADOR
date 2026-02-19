@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 
 const ConfirmModal = ({
     isOpen,
@@ -13,7 +14,7 @@ const ConfirmModal = ({
 }) => {
     if (!isOpen) return null;
 
-    return (
+    return createPortal(
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content alert-modal-content" onClick={e => e.stopPropagation()}>
                 <span className="alert-modal-icon">{icon}</span>
@@ -35,7 +36,8 @@ const ConfirmModal = ({
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
 

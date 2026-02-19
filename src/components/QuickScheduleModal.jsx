@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from '../supabase';
 
 const QuickScheduleModal = ({ baseCita, onClose, onSelectSlot, agendaId }) => {
@@ -206,7 +207,7 @@ const QuickScheduleModal = ({ baseCita, onClose, onSelectSlot, agendaId }) => {
         setSlots(foundSlots);
     };
 
-    return (
+    return createPortal(
         <div className="modal-overlay">
             <div className="modal-content" style={{ maxWidth: '500px' }}>
                 <h3>Agendar Siguiente Sesión</h3>
@@ -280,7 +281,8 @@ const QuickScheduleModal = ({ baseCita, onClose, onSelectSlot, agendaId }) => {
                     <button className="btn-secondary" onClick={onClose}>Cancelar</button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
 

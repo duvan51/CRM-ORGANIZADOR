@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "../supabase";
 
 export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agendaId, token, userRole, initialData = null, currentUserName = "" }) {
@@ -531,7 +532,7 @@ export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agen
         }
     };
 
-    return (
+    return createPortal(
         <div className="modal-overlay" onClick={onCancel}>
             <div className="modal-content agenda-form-card" onClick={e => e.stopPropagation()}>
                 <button className="modal-close-btn" onClick={onCancel} title="Cerrar">×</button>
@@ -768,12 +769,10 @@ export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agen
                         <button type="submit" className="btn-process" disabled={loading || !!validationError}>
                             {loading ? "Guardando..." : (initialData ? "Guardar Cambios" : "Guardar Cita")}
                         </button>
-
                     </div>
                 </form>
-            </div >
-        </div >
+            </div>
+        </div>,
+        document.body
     );
 }
-
-
