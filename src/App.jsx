@@ -73,6 +73,7 @@ function App() {
   const [pendingConfirmations, setPendingConfirmations] = useState(0); // For the bell
   const [pendingReschedule, setPendingReschedule] = useState(null);
   const [isResetting, setIsResetting] = useState(window.location.hash === "#reset-password");
+  const [isDataDeletion, setIsDataDeletion] = useState(window.location.hash === "#data-deletion");
 
   useEffect(() => {
     const checkPending = async () => {
@@ -398,6 +399,32 @@ function App() {
   };
 
   if (isResetting) return <ResetPasswordForm onComplete={() => setIsResetting(false)} />;
+
+  if (isDataDeletion) return (
+    <div style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', color: 'var(--text-main)', textAlign: 'center' }}>
+      <h1>Solicitud de Eliminación de Datos (Data Deletion)</h1>
+      <p style={{ marginTop: '20px', fontSize: '1.2rem' }}>
+        De acuerdo con las regulaciones de Meta para aplicaciones de terceros, proporcionamos este medio para que los usuarios soliciten la eliminación de sus datos personales.
+      </p>
+      <div className="card" style={{ marginTop: '40px', padding: '30px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+        <h3>Instrucciones para eliminar tus datos:</h3>
+        <ol style={{ textAlign: 'left', marginTop: '20px', display: 'inline-block' }}>
+          <li style={{ marginBottom: '10px' }}>Envía un correo electrónico a nuestro equipo de soporte técnico.</li>
+          <li style={{ marginBottom: '10px' }}>Indique su nombre de usuario o el correo electrónico asociado a su cuenta.</li>
+          <li style={{ marginBottom: '10px' }}>Especificar que desea eliminar todos los datos personales asociados a su cuenta.</li>
+        </ol>
+        <p style={{ marginTop: '30px', fontWeight: 'bold' }}>
+          Correo de Soporte: <a href="mailto:soporte@tu-dominio.com" style={{ color: 'var(--primary)' }}>soporte@tu-dominio.com</a>
+        </p>
+        <p style={{ marginTop: '15px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+          Una vez recibida la solicitud, procesaremos la eliminación permanente de sus registros en un plazo máximo de 72 horas hábiles.
+        </p>
+      </div>
+      <button className="btn-secondary" style={{ marginTop: '40px' }} onClick={() => { window.location.hash = ""; setIsDataDeletion(false); }}>
+        Volver al Inicio
+      </button>
+    </div>
+  );
 
   if (!user) return <Login onLoginSuccess={(userData) => {
     setUser(userData);

@@ -99,6 +99,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     });
     const [newBlock, setNewBlock] = useState({ agenda_id: "", fecha_inicio: "", fecha_fin: "", hora_inicio: "", hora_fin: "", es_todo_el_dia: 0, motivo: "", service_id: "", tipo: 1 });
     const [newAlert, setNewAlert] = useState({ agenda_id: "", mensaje: "", tipo: "info" });
+    const [editingUser, setEditingUser] = useState(null);
 
     // Logs State
     const [globalSmsLogs, setGlobalSmsLogs] = useState([]);
@@ -566,6 +567,55 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
     };
 
+    const handleEditUser = (user) => {
+        setEditingUser(user);
+        setNewUser({
+            full_name: user.full_name || "",
+            username: user.username || "",
+            email: user.email || "", // Recordar que profiles podría no tener email si no se guardó ahí
+            password: "", // No mostramos password por seguridad
+            role: user.role || "agent"
+        });
+        setShowUserModal(true);
+    };
+
+    const handleUpdateUser = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        try {
+            // Llamar a la Edge Function para poder actualizar Auth (email/password) y Profile al tiempo
+            const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({
+                    userId: editingUser.id,
+                    email: newUser.email,
+                    password: newUser.password || null, // Solo se envía si se escribió algo
+                    full_name: newUser.full_name,
+                    username: newUser.username,
+                    role: newUser.role
+                })
+            });
+
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
+
+            alert("✅ Usuario y credenciales actualizados correctamente.");
+            setShowUserModal(false);
+            setEditingUser(null);
+            setNewUser({ full_name: "", username: "", email: "", password: "", role: "agent" });
+            fetchData();
+        } catch (error) {
+            console.error("Error al actualizar usuario:", error);
+            alert("Error al actualizar: " + error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleSaveService = async (e) => {
         e.preventDefault();
         setLoading(true);
@@ -719,7 +769,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 <th>Usuario</th>
                                 <th>Rol</th>
                                 <th>Agendas</th>
-                                {userRole === "superuser" && <th>Acciones</th>}
+                                {(userRole === "superuser" || userRole === "owner") && <th>Acciones</th>}
                             </tr>
                         </thead>
                         <tbody>
@@ -735,6 +785,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <td>{u.agendas?.map(ua => ua.agenda.name).join(", ") || "Sin acceso"}</td>
                                     {(userRole === "superuser" || userRole === "owner") && (
                                         <td>
+                                            <button className="btn-edit" style={{ padding: '6px 12px', marginRight: '5px' }} onClick={() => handleEditUser(u)}>✏️</button>
                                             <button className="btn-delete" style={{ padding: '6px 12px' }} onClick={() => handleDeleteUser(u.id)}>🗑️</button>
                                         </td>
                                     )}
@@ -2481,6 +2532,43 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     </button>
                 </form>
             </div>
+
+            <div className="premium-card" style={{ maxWidth: '500px', margin: '30px auto 0 auto', border: '1px solid var(--primary)', background: 'rgba(var(--primary-rgb), 0.05)' }}>
+                <h4 style={{ color: 'var(--primary)' }}>🛡️ Cumplimiento Meta (Data Deletion)</h4>
+                <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '15px' }}>
+                    Meta requiere una URL de "Eliminación de datos de usuario" para verificar tu aplicación.
+                    Copia y pega la siguiente URL en tu panel de desarrolladores de Meta:
+                </p>
+                <div style={{ background: '#000', padding: '12px', borderRadius: '8px', border: '1px solid var(--glass-border)', position: 'relative' }}>
+                    <code style={{ color: '#0f0', fontSize: '0.8rem', wordBreak: 'break-all' }}>
+                        {window.location.origin}/#data-deletion
+                    </code>
+                    <button
+                        onClick={() => {
+                            navigator.clipboard.writeText(`${window.location.origin}/#data-deletion`);
+                            alert("URL copiada al portapapeles");
+                        }}
+                        style={{
+                            position: 'absolute',
+                            right: '5px',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'var(--primary)',
+                            border: 'none',
+                            borderRadius: '4px',
+                            color: 'white',
+                            fontSize: '0.7rem',
+                            padding: '4px 8px',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Copiar
+                    </button>
+                </div>
+                <p style={{ fontSize: '0.75rem', marginTop: '10px', opacity: 0.8 }}>
+                    <strong>Nota:</strong> Esta URL proporciona las instrucciones y el contacto necesario para que los usuarios soliciten la eliminación de sus datos, cumpliendo con las políticas de privacidad de Meta.
+                </p>
+            </div>
         </div>
     );
 
@@ -2765,12 +2853,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 document.body
             )}
 
-            {/* MODAL: NEW USER */}
+            {/* MODAL: NEW USER / EDIT USER */}
             {showUserModal && createPortal(
                 <div className="modal-overlay">
                     <div className="modal-content premium-modal">
-                        <h3>Crear Nuevo Usuario</h3>
-                        <form onSubmit={handleCreateUser} className="premium-form">
+                        <h3>{editingUser ? 'Editar Personal' : 'Crear Nuevo Usuario'}</h3>
+                        <form onSubmit={editingUser ? handleUpdateUser : handleCreateUser} className="premium-form">
                             <div className="form-group">
                                 <label>Nombre Completo</label>
                                 <input type="text" value={newUser.full_name} onChange={e => setNewUser({ ...newUser, full_name: e.target.value })} required placeholder="Ej: Juan Pérez" />
@@ -2779,14 +2867,16 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 <label>Nombre de Usuario</label>
                                 <input type="text" value={newUser.username} onChange={e => setNewUser({ ...newUser, username: e.target.value })} required placeholder="ej: juan_p" />
                             </div>
+
                             <div className="form-group">
-                                <label>Correo Electrónico</label>
+                                <label>Correo Electrónico {editingUser && <small>(Dejar igual para no cambiar)</small>}</label>
                                 <input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} required placeholder="ej: admin@correo.com" />
                             </div>
                             <div className="form-group">
-                                <label>Contraseña</label>
-                                <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} required placeholder="Mínimo 6 caracteres" minLength="6" />
+                                <label>Contraseña {editingUser && <small>(Llenar solo para cambiarla)</small>}</label>
+                                <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} required={!editingUser} placeholder={editingUser ? "Nueva clave..." : "Mínimo 6 caracteres"} minLength="6" />
                             </div>
+
                             <div className="form-group">
                                 <label>Rol del Usuario</label>
                                 {(userRole === 'superuser' || userRole === 'owner') ? (
@@ -2802,9 +2892,9 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 )}
                             </div>
                             <div className="modal-footer">
-                                <button type="button" className="btn-secondary" onClick={() => setShowUserModal(false)}>Cancelar</button>
+                                <button type="button" className="btn-secondary" onClick={() => { setShowUserModal(false); setEditingUser(null); setNewUser({ full_name: "", username: "", email: "", password: "", role: "agent" }); }}>Cancelar</button>
                                 <button type="submit" className="btn-process" disabled={loading}>
-                                    {loading ? "Creando..." : "Crear Usuario"}
+                                    {loading ? (editingUser ? "Guardando..." : "Creando...") : (editingUser ? "Guardar Cambios" : "Crear Usuario")}
                                 </button>
                             </div>
                         </form>

@@ -42,7 +42,7 @@ const SmsLogsList = ({ phone, clinicId }) => {
                 }
             });
             if (error) throw error;
-            alert("SMS reenviado con ├®xito");
+            alert("SMS reenviado con éxito");
             fetchLogs();
         } catch (e) {
             console.error(e);
@@ -70,7 +70,7 @@ const SmsLogsList = ({ phone, clinicId }) => {
                             fontWeight: 'bold',
                             textTransform: 'uppercase'
                         }}>
-                            {log.status === 'success' ? 'Ô£ô Enviado' : 'Ô£ù Fallido'}
+                            {log.status === 'success' ? '✓ Enviado' : '✖ Fallido'}
                         </span>
                         <span style={{ color: 'var(--text-muted)' }}>{new Date(log.created_at).toLocaleString()}</span>
                     </div>
@@ -92,7 +92,7 @@ const SmsLogsList = ({ phone, clinicId }) => {
                                 fontSize: '0.7rem'
                             }}
                         >
-                            {retrying === log.id ? 'Reenviando...' : '­ƒöä Reintentar Envío'}
+                            {retrying === log.id ? 'Reenviando...' : '🔄 Reintentar Envío'}
                         </button>
                     )}
                 </div>
@@ -146,7 +146,7 @@ const EmailLogsList = ({ email, clinicId }) => {
                 }
             });
             if (error) throw error;
-            alert("Email reenviado con ├®xito");
+            alert("Email reenviado con éxito");
             fetchLogs();
         } catch (e) {
             console.error(e);
@@ -174,7 +174,7 @@ const EmailLogsList = ({ email, clinicId }) => {
                             fontWeight: 'bold',
                             textTransform: 'uppercase'
                         }}>
-                            {log.status === 'success' ? 'Ô£ô Enviado' : 'Ô£ù Fallido'}
+                            {log.status === 'success' ? '✓ Enviado' : '✖ Fallido'}
                         </span>
                         <span style={{ color: 'var(--text-muted)' }}>{new Date(log.created_at).toLocaleString()}</span>
                     </div>
@@ -196,7 +196,7 @@ const EmailLogsList = ({ email, clinicId }) => {
                                 fontSize: '0.7rem'
                             }}
                         >
-                            {retrying === log.id ? 'Reenviando...' : '­ƒöä Reintentar Envío'}
+                            {retrying === log.id ? 'Reenviando...' : '🔄 Reintentar Envío'}
                         </button>
                     )}
                 </div>
@@ -600,7 +600,7 @@ const AgentDashboard = ({ user }) => {
                         </div>
                     </div>
                     <div className="dash-card success">
-                        <span className="dash-icon">­ƒÆ░</span>
+                        <span className="dash-icon">💰</span>
                         <div className="dash-info">
                             <h3>Ventas Meta</h3>
                             <p className="dash-value">${revenueFromMeta.toLocaleString()}</p>
@@ -608,7 +608,7 @@ const AgentDashboard = ({ user }) => {
                         </div>
                     </div>
                     <div className="dash-card warning">
-                        <span className="dash-icon">­ƒôê</span>
+                        <span className="dash-icon">📈</span>
                         <div className="dash-info">
                             <h3>ROAS (Retorno)</h3>
                             <p className="dash-value">
@@ -675,7 +675,7 @@ const AgentDashboard = ({ user }) => {
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                                                     {col.label}
                                                     <span style={{ fontSize: '0.7rem', color: sortConfig.key === col.key ? 'var(--primary)' : '#666' }}>
-                                                        {sortConfig.key === col.key ? (sortConfig.direction === 'desc' ? 'Ôû╝' : 'Ôû▓') : 'Ôåò'}
+                                                        {sortConfig.key === col.key ? (sortConfig.direction === 'desc' ? '▼' : '▲') : '↕'}
                                                     </span>
                                                 </div>
                                             </th>
@@ -699,8 +699,8 @@ const AgentDashboard = ({ user }) => {
                                                     }}
                                                 >
                                                     <td style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                        <span style={{ fontSize: '0.8rem', width: '15px' }}>{isExpanded ? 'Ôû╝' : 'ÔûÂ'}</span>
-                                                        <strong>­ƒôó {camp.campaign_name}</strong>
+                                                        <span style={{ fontSize: '0.8rem', width: '15px' }}>{isExpanded ? '▼' : '▶'}</span>
+                                                        <strong>📢 {camp.campaign_name}</strong>
                                                     </td>
                                                     <td style={{ padding: '12px', fontWeight: 700 }}>${camp.spend.toLocaleString()}</td>
                                                     <td style={{ padding: '12px' }}>{camp.clicks}</td>
@@ -714,7 +714,7 @@ const AgentDashboard = ({ user }) => {
                                                 {isExpanded && children.map(adset => (
                                                     <tr key={adset.campaign_id} style={{ background: 'rgba(0,0,0,0.2)', fontSize: '0.85rem', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
                                                         <td style={{ padding: '10px 10px 10px 40px', color: 'var(--text-muted)' }}>
-                                                            ­ƒôª {adset.campaign_name}
+                                                            📦 {adset.campaign_name}
                                                         </td>
                                                         <td style={{ padding: '10px' }}>${adset.spend.toLocaleString()}</td>
                                                         <td style={{ padding: '10px' }}>{adset.clicks}</td>
@@ -748,8 +748,8 @@ const AgentDashboard = ({ user }) => {
         const currentYear = new Date().getFullYear();
         const currentMonth = new Date().getMonth(); // 0-11
 
-        const allAgendas = [{ id: -1, name: "­ƒîÉ TOTAL CONSOLIDADO / CLÍNICA" }, ...(user.agendas || [])];
-        const allSellersWithGeneral = [{ full_name: "­ƒÆ╝ VENTA PRESENCIAL / GENERAL" }, ...allSellers];
+        const allAgendas = [{ id: -1, name: "🌐 TOTAL CONSOLIDADO / CLÍNICA" }, ...(user.agendas || [])];
+        const allSellersWithGeneral = [{ full_name: "💼 VENTA PRESENCIAL / GENERAL" }, ...allSellers];
 
         // Calcular Totales Globales (Sumatoria)
         const getGlobalTotals = () => {
@@ -912,7 +912,7 @@ const AgentDashboard = ({ user }) => {
                                 border: '1px solid rgba(255,255,255,0.1)'
                             }}
                         >
-                            <span style={{ fontSize: '1.2rem' }}>{isEditing ? '­ƒöÆ' : '­ƒöô'}</span>
+                            <span style={{ fontSize: '1.2rem' }}>{isEditing ? '🔒' : '🔓'}</span>
                             {isEditing ? 'Finalizar Edición' : 'Editar Datos'}
                         </button>
                     </div>
@@ -957,7 +957,7 @@ const AgentDashboard = ({ user }) => {
                 <div className="dashboard-table-container card">
                     <div className="table-header-dash" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <h3>Rentabilidad por Sede/Agenda ({months[selectedMonth]} {selectedYear})</h3>
-                        {saving && <span style={{ fontSize: '0.8rem', color: 'var(--primary)', animation: 'pulse 1s infinite' }}>ÔÅ│ Guardando cambios...</span>}
+                        {saving && <span style={{ fontSize: '0.8rem', color: 'var(--primary)', animation: 'pulse 1s infinite' }}>⏳ Guardando cambios...</span>}
                     </div>
                     <div className="table-wrapper" style={{ padding: '20px' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1082,7 +1082,7 @@ const AgentDashboard = ({ user }) => {
                                                 <td colSpan="6" style={{ padding: '10px 10px 15px 40px' }}>
                                                     <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
                                                         <span style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 'bold' }}>
-                                                            {isGlobalRow ? '­ƒæñ TOTAL AGENTES:' : '­ƒæñ AGENTES:'}
+                                                            {isGlobalRow ? '👥 TOTAL AGENTES:' : '👥 AGENTES:'}
                                                         </span>
                                                         {allSellersWithGeneral.map(seller => {
                                                             const sName = seller.full_name || seller.username;
@@ -1158,57 +1158,61 @@ const AgentDashboard = ({ user }) => {
                         cursor: 'pointer'
                     }}
                 >
-                    ­ƒôè Estadísticas Generales
+                    📊 Estadísticas Generales
                 </button>
-                <button
-                    className={`btn-tab ${view === 'meta' ? 'active' : ''}`}
-                    onClick={() => setView('meta')}
-                    style={{
-                        padding: '10px 20px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--glass-border)',
-                        background: view === 'meta' ? 'var(--primary)' : 'transparent',
-                        color: view === 'meta' ? 'white' : 'var(--text-main)',
-                        cursor: 'pointer'
-                    }}
-                >
-                    📱 Rendimiento Ads
-                </button>
-                <button
-                    className={`btn-tab ${view === 'profit' ? 'active' : ''}`}
-                    onClick={() => setView('profit')}
-                    style={{
-                        padding: '10px 20px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--glass-border)',
-                        background: view === 'profit' ? 'var(--primary)' : 'transparent',
-                        color: view === 'profit' ? 'white' : 'var(--text-main)',
-                        cursor: 'pointer'
-                    }}
-                >
-                    ­ƒÆ╣ Rentabilidad REAL
-                </button>
-                <button
-                    className={`btn-tab ${view === 'aimonitor' ? 'active' : ''}`}
-                    onClick={() => setView('aimonitor')}
-                    style={{
-                        padding: '10px 20px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--glass-border)',
-                        background: view === 'aimonitor' ? 'var(--primary)' : 'transparent',
-                        color: view === 'aimonitor' ? 'white' : 'var(--text-main)',
-                        cursor: 'pointer'
-                    }}
-                >
-                    🤖 Monitor IA
-                </button>
+                {(user.role === 'superuser' || user.role === 'admin' || user.role === 'owner') && (
+                    <>
+                        <button
+                            className={`btn-tab ${view === 'meta' ? 'active' : ''}`}
+                            onClick={() => setView('meta')}
+                            style={{
+                                padding: '10px 20px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--glass-border)',
+                                background: view === 'meta' ? 'var(--primary)' : 'transparent',
+                                color: view === 'meta' ? 'white' : 'var(--text-main)',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            📱 Rendimiento Ads
+                        </button>
+                        <button
+                            className={`btn-tab ${view === 'profit' ? 'active' : ''}`}
+                            onClick={() => setView('profit')}
+                            style={{
+                                padding: '10px 20px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--glass-border)',
+                                background: view === 'profit' ? 'var(--primary)' : 'transparent',
+                                color: view === 'profit' ? 'white' : 'var(--text-main)',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            💹 Rentabilidad REAL
+                        </button>
+                        <button
+                            className={`btn-tab ${view === 'aimonitor' ? 'active' : ''}`}
+                            onClick={() => setView('aimonitor')}
+                            style={{
+                                padding: '10px 20px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--glass-border)',
+                                background: view === 'aimonitor' ? 'var(--primary)' : 'transparent',
+                                color: view === 'aimonitor' ? 'white' : 'var(--text-main)',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            🤖 Monitor IA
+                        </button>
+                    </>
+                )}
             </div>
 
             {view === 'general' ? (
                 <>
                     <div className={`dashboard-header-stats ${isFetching ? 'pulse-loading' : ''}`}>
                         <div className="dash-card primary">
-                            <span className="dash-icon">­ƒÆ░</span>
+                            <span className="dash-icon">💰</span>
                             <div className="dash-info">
                                 <h3>Total Ventas</h3>
                                 <p className="dash-value">${stats.sold.toLocaleString()}</p>
@@ -1216,7 +1220,7 @@ const AgentDashboard = ({ user }) => {
                             </div>
                         </div>
                         <div className="dash-card danger">
-                            <span className="dash-icon">­ƒôë</span>
+                            <span className="dash-icon">📉</span>
                             <div className="dash-info">
                                 <h3>Total Cancelado</h3>
                                 <p className="dash-value">${stats.canceled.toLocaleString()}</p>
@@ -1224,7 +1228,7 @@ const AgentDashboard = ({ user }) => {
                             </div>
                         </div>
                         <div className="dash-card warning">
-                            <span className="dash-icon">ÔÅ│</span>
+                            <span className="dash-icon">⏳</span>
                             <div className="dash-info">
                                 <h3>En Seguimiento</h3>
                                 <p className="dash-value">${stats.pending.toLocaleString()}</p>
@@ -1293,7 +1297,7 @@ const AgentDashboard = ({ user }) => {
                                         <div key={patient.id} className="patient-group-card" style={{ marginBottom: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
                                             <div className="group-header" style={{ padding: '15px', background: 'rgba(var(--primary-rgb), 0.1)', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <div>
-                                                    <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-main)' }}>­ƒæñ {patient.name}</h4>
+                                                    <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-main)' }}>👤 {patient.name}</h4>
                                                     <small style={{ color: 'var(--text-muted)' }}>{patient.doc} "ó {patient.celular}</small>
                                                 </div>
                                             </div>
@@ -1318,7 +1322,7 @@ const AgentDashboard = ({ user }) => {
                                                                     <span>{s.fecha}</span>
                                                                     <span className={`status-pill ${s.confirmacion.toLowerCase()}`} style={{ fontSize: '0.75rem', padding: '2px 8px' }}>{s.confirmacion}</span>
                                                                     <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{s.hora} - {s.vendedor || 'N/A'}</span>
-                                                                    <button className="btn-icon-mini" onClick={() => setShowDetail(s)} title="Ver Detalles">­ƒæü´©Å</button>
+                                                                    <button className="btn-icon-mini" onClick={() => setShowDetail(s)} title="Ver Detalles">👁️</button>
                                                                 </div>
                                                             ))}
                                                         </div>
