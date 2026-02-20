@@ -2534,39 +2534,40 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             </div>
 
             <div className="premium-card" style={{ maxWidth: '500px', margin: '30px auto 0 auto', border: '1px solid var(--primary)', background: 'rgba(var(--primary-rgb), 0.05)' }}>
-                <h4 style={{ color: 'var(--primary)' }}>🛡️ Cumplimiento Meta (Data Deletion)</h4>
+                <h4 style={{ color: 'var(--primary)' }}>🛡️ Cumplimiento Meta (Verification)</h4>
                 <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '15px' }}>
-                    Meta requiere una URL de "Eliminación de datos de usuario" para verificar tu aplicación.
-                    Copia y pega la siguiente URL en tu panel de desarrolladores de Meta:
+                    Meta requiere estas URLs para verificar tu aplicación. Copia y pega cada una en su campo correspondiente:
                 </p>
-                <div style={{ background: '#000', padding: '12px', borderRadius: '8px', border: '1px solid var(--glass-border)', position: 'relative' }}>
-                    <code style={{ color: '#0f0', fontSize: '0.8rem', wordBreak: 'break-all' }}>
-                        {window.location.origin}/#data-deletion
-                    </code>
-                    <button
-                        onClick={() => {
-                            navigator.clipboard.writeText(`${window.location.origin}/#data-deletion`);
-                            alert("URL copiada al portapapeles");
-                        }}
-                        style={{
-                            position: 'absolute',
-                            right: '5px',
-                            top: '50%',
-                            transform: 'translateY(-50%)',
-                            background: 'var(--primary)',
-                            border: 'none',
-                            borderRadius: '4px',
-                            color: 'white',
-                            fontSize: '0.7rem',
-                            padding: '4px 8px',
-                            cursor: 'pointer'
-                        }}
-                    >
-                        Copiar
-                    </button>
+
+                {/* Data Deletion */}
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>DATA DELETION URL:</label>
+                    <div style={{ background: '#000', padding: '10px', borderRadius: '8px', border: '1px solid var(--glass-border)', position: 'relative' }}>
+                        <code style={{ color: '#0f0', fontSize: '0.75rem', wordBreak: 'break-all' }}>{window.location.origin}/#data-deletion</code>
+                        <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/#data-deletion`); alert("Copiado"); }} style={{ position: 'absolute', right: '5px', top: '50%', transform: 'translateY(-50%)', background: 'var(--primary)', border: 'none', borderRadius: '4px', color: 'white', fontSize: '0.6rem', padding: '2px 6px', cursor: 'pointer' }}>Copiar</button>
+                    </div>
                 </div>
-                <p style={{ fontSize: '0.75rem', marginTop: '10px', opacity: 0.8 }}>
-                    <strong>Nota:</strong> Esta URL proporciona las instrucciones y el contacto necesario para que los usuarios soliciten la eliminación de sus datos, cumpliendo con las políticas de privacidad de Meta.
+
+                {/* Privacy Policy */}
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>PRIVACY POLICY URL:</label>
+                    <div style={{ background: '#000', padding: '10px', borderRadius: '8px', border: '1px solid var(--glass-border)', position: 'relative' }}>
+                        <code style={{ color: '#0f0', fontSize: '0.75rem', wordBreak: 'break-all' }}>{window.location.origin}/#privacy-policy</code>
+                        <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/#privacy-policy`); alert("Copiado"); }} style={{ position: 'absolute', right: '5px', top: '50%', transform: 'translateY(-50%)', background: 'var(--primary)', border: 'none', borderRadius: '4px', color: 'white', fontSize: '0.6rem', padding: '2px 6px', cursor: 'pointer' }}>Copiar</button>
+                    </div>
+                </div>
+
+                {/* Terms of Service */}
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>TERMS OF SERVICE URL:</label>
+                    <div style={{ background: '#000', padding: '10px', borderRadius: '8px', border: '1px solid var(--glass-border)', position: 'relative' }}>
+                        <code style={{ color: '#0f0', fontSize: '0.75rem', wordBreak: 'break-all' }}>{window.location.origin}/#terms-of-service</code>
+                        <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/#terms-of-service`); alert("Copiado"); }} style={{ position: 'absolute', right: '5px', top: '50%', transform: 'translateY(-50%)', background: 'var(--primary)', border: 'none', borderRadius: '4px', color: 'white', fontSize: '0.6rem', padding: '2px 6px', cursor: 'pointer' }}>Copiar</button>
+                    </div>
+                </div>
+
+                <p style={{ fontSize: '0.7rem', marginTop: '10px', opacity: 0.8 }}>
+                    <strong>Nota:</strong> Estas páginas son generadas automáticamente por el CRM para cumplir con las políticas de Meta.
                 </p>
             </div>
         </div>

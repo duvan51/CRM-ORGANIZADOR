@@ -74,6 +74,8 @@ function App() {
   const [pendingReschedule, setPendingReschedule] = useState(null);
   const [isResetting, setIsResetting] = useState(window.location.hash === "#reset-password");
   const [isDataDeletion, setIsDataDeletion] = useState(window.location.hash === "#data-deletion");
+  const [isPrivacyPolicy, setIsPrivacyPolicy] = useState(window.location.hash === "#privacy-policy");
+  const [isTermsOfService, setIsTermsOfService] = useState(window.location.hash === "#terms-of-service");
 
   useEffect(() => {
     const checkPending = async () => {
@@ -423,6 +425,56 @@ function App() {
       <button className="btn-secondary" style={{ marginTop: '40px' }} onClick={() => { window.location.hash = ""; setIsDataDeletion(false); }}>
         Volver al Inicio
       </button>
+    </div>
+  );
+
+  if (isPrivacyPolicy) return (
+    <div style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', color: 'var(--text-main)' }}>
+      <h1 style={{ textAlign: 'center' }}>Política de Privacidad</h1>
+      <div className="card" style={{ marginTop: '30px', padding: '30px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', lineHeight: '1.6' }}>
+        <p><strong>Última actualización: {new Date().toLocaleDateString()}</strong></p>
+        <p>Esta Política de Privacidad describe cómo recopilamos, usamos y protegemos su información personal cuando utiliza nuestro CRM y los servicios integrados de Meta (WhatsApp/Ads).</p>
+
+        <h3>1. Información que recopilamos</h3>
+        <p>Recopilamos información proporcionada directamente por usted (nombre, email, datos de contacto) y metadatos de las interacciones con sus clientes a través de la API de WhatsApp para facilitar la gestión comercial.</p>
+
+        <h3>2. Uso de la información</h3>
+        <p>Utilizamos sus datos únicamente para la operación técnica del CRM, el seguimiento de citas médicas y la provisión de respuestas automatizadas mediante nuestra IA integrada.</p>
+
+        <h3>3. Integración con Meta</h3>
+        <p>Nuestra aplicación utiliza las APIs de Meta. Solo accedemos a la información necesaria para gestionar sus campañas de Ads y mensajes de WhatsApp. No vendemos sus datos a terceros.</p>
+
+        <h3>4. Sus derechos</h3>
+        <p>Usted puede solicitar el acceso, rectificación o eliminación de sus datos en cualquier momento a través de nuestro canal de soporte técnico.</p>
+      </div>
+      <div style={{ textAlign: 'center', marginTop: '30px' }}>
+        <button className="btn-secondary" onClick={() => { window.location.hash = ""; setIsPrivacyPolicy(false); }}>Volver al Inicio</button>
+      </div>
+    </div>
+  );
+
+  if (isTermsOfService) return (
+    <div style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', color: 'var(--text-main)' }}>
+      <h1 style={{ textAlign: 'center' }}>Condiciones del Servicio</h1>
+      <div className="card" style={{ marginTop: '30px', padding: '30px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', lineHeight: '1.6' }}>
+        <p><strong>Última actualización: {new Date().toLocaleDateString()}</strong></p>
+        <p>Al acceder y utilizar nuestro CRM, usted acepta cumplir con estos términos y condiciones.</p>
+
+        <h3>1. Propiedad del Servicio</h3>
+        <p>El CRM es una plataforma de gestión comercial diseñada para clínicas y profesionales de la salud. Todos los derechos sobre la plataforma pertenecen a sus respectivos desarrolladores.</p>
+
+        <h3>2. Responsabilidad del Usuario</h3>
+        <p>Usted es responsable de la veracidad de los datos ingresados y del uso ético de las herramientas de automatización de mensajería, cumpliendo con las políticas comerciales de Meta.</p>
+
+        <h3>3. Limitación de Responsabilidad</h3>
+        <p>No nos hacemos responsables por fallos técnicos derivados de servicios de terceros (como cortes de AWS, Supabase o cambios en la API de Meta).</p>
+
+        <h3>4. Terminación</h3>
+        <p>Nos reservamos el derecho de suspender el acceso si se detecta un uso abusivo que comprometa la estabilidad del sistema.</p>
+      </div>
+      <div style={{ textAlign: 'center', marginTop: '30px' }}>
+        <button className="btn-secondary" onClick={() => { window.location.hash = ""; setIsTermsOfService(false); }}>Volver al Inicio</button>
+      </div>
     </div>
   );
 
