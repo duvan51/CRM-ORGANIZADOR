@@ -4,6 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 import ConfirmModal from "./ConfirmModal";
 import AiAgentSection from "./AiAgentSection";
+import MetaConnectModal from "./MetaConnectModal";
+import { initFacebookSDK, loginWithFacebook } from "../utils/facebookSDK";
 
 const AdminPanel = ({ token, onBack, userRole }) => {
     console.log("AdminPanel Mount - Role:", userRole);
@@ -39,6 +41,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [metaSortConfig, setMetaSortConfig] = useState({ key: 'spend', direction: 'desc' });
     const [savedViews, setSavedViews] = useState(() => JSON.parse(localStorage.getItem("meta_saved_views") || "[]"));
     const [newViewName, setNewViewName] = useState("");
+    const [tempMetaToken, setTempMetaToken] = useState(null);
+    const [showMetaConnectModal, setShowMetaConnectModal] = useState(false);
 
     // SMS Automation States
     const [infobipConfig, setInfobipConfig] = useState({ api_key: "", base_url: "", sender_id: "CRM_SMS", is_active: true });
@@ -130,6 +134,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
     useEffect(() => {
         fetchData();
+        initFacebookSDK();
     }, []);
 
     useEffect(() => {
@@ -1660,6 +1665,69 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
     };
 
+    const handleMetaLogin = async () => {
+        try {
+            const authResponse = await loginWithFacebook([
+                'ads_management',
+                'business_management',
+                'ads_read',
+                'whatsapp_business_management',
+                'whatsapp_business_messaging',
+                'pages_show_list'
+            ]);
+            setTempMetaToken(authResponse.accessToken);
+            setShowMetaConnectModal(true);
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
+    const handleSaveMetaAssets = async ({ business, adAccounts, wabas }) => {
+        setSavingMeta(true);
+        try {
+            // 1. Guardar Configuración Base (Token y Business ID)
+            const { error: configError } = await supabase.from('meta_ads_config').upsert({
+                clinic_id: clinicId,
+                access_token: tempMetaToken,
+                business_id: business.id,
+                is_active: true
+            }, { onConflict: 'clinic_id' });
+            if (configError) throw configError;
+
+            // 2. Guardar Cuentas Ads
+            for (const acc of adAccounts) {
+                await supabase.from('meta_ads_accounts').upsert({
+                    clinic_id: clinicId,
+                    ad_account_id: acc.id,
+                    name: acc.name,
+                    is_sync_enabled: true
+                }, { onConflict: 'clinic_id,ad_account_id' });
+            }
+
+            // 3. Guardar Configuración de WhatsApp (si existe al menos una)
+            if (wabas.length > 0) {
+                const primaryWaba = wabas[0];
+                const primaryPhone = primaryWaba.phone_numbers?.[0];
+
+                if (primaryPhone) {
+                    await supabase.from('ai_agent_config').upsert({
+                        clinic_id: clinicId,
+                        phone_id: primaryPhone.id,
+                        meta_access_token: tempMetaToken,
+                        is_active: true
+                    }, { onConflict: 'clinic_id' });
+                }
+            }
+
+            alert("✅ ¡Conexión exitosa! Los activos seleccionados han sido vinculados.");
+            fetchData();
+        } catch (err) {
+            alert("Error al vincular activos: " + err.message);
+        } finally {
+            setSavingMeta(false);
+        }
+    };
+
     const toggleAccountSync = async (accountId, currentStatus) => {
         const { error } = await supabase.from('meta_ads_accounts').update({ is_sync_enabled: !currentStatus }).eq('id', accountId);
         if (!error) {
@@ -1949,8 +2017,16 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <label>ID de Portafolio / Negocio</label>
                                     <input type="text" value={metaConfig.business_id} onChange={e => setMetaConfig({ ...metaConfig, business_id: e.target.value })} placeholder="1234567890..." />
                                 </div>
-                                <button type="submit" className="btn-process" disabled={savingMeta} style={{ width: '100%' }}>
-                                    {savingMeta ? "Guardando..." : "💾 Guardar Configuración"}
+                                <button type="submit" className="btn-process" disabled={savingMeta} style={{ width: '100%', marginBottom: '15px' }}>
+                                    {savingMeta ? "Guardando..." : "💾 Guardar Manual"}
+                                </button>
+                                <div style={{ textAlign: 'center', position: 'relative', margin: '20px 0' }}>
+                                    <hr style={{ border: 'none', borderTop: '1px solid var(--glass-border)' }} />
+                                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'var(--card-bg)', padding: '0 10px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>O BIEN</span>
+                                </div>
+                                <button type="button" onClick={handleMetaLogin} className="btn-process" style={{ width: '100%', background: '#1877F2', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" /></svg>
+                                    Conectar con Meta
                                 </button>
                             </form>
                         </div>
@@ -3143,6 +3219,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 </div>,
                 document.body
             )}
+
+            <MetaConnectModal
+                isOpen={showMetaConnectModal}
+                onClose={() => setShowMetaConnectModal(false)}
+                accessToken={tempMetaToken}
+                onSave={handleSaveMetaAssets}
+            />
 
             <ConfirmModal
                 isOpen={confirmModal.isOpen}
