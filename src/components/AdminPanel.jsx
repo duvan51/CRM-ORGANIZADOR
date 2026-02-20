@@ -37,6 +37,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [metaAgendaFilter, setMetaAgendaFilter] = useState("ALL");
     const [isMultiSelectOpen, setIsMultiSelectOpen] = useState(false);
     const [metaSortConfig, setMetaSortConfig] = useState({ key: 'spend', direction: 'desc' });
+    const [savedViews, setSavedViews] = useState(() => JSON.parse(localStorage.getItem("meta_saved_views") || "[]"));
+    const [newViewName, setNewViewName] = useState("");
 
     // SMS Automation States
     const [infobipConfig, setInfobipConfig] = useState({ api_key: "", base_url: "", sender_id: "CRM_SMS", is_active: true });
@@ -62,13 +64,16 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         { event_type: 'reminder_24h', subject: "Recordatorio de Cita Mañana", content: "Recordatorio: {paciente}, tienes una cita mañana {fecha} a las {hora}. Por favor confirma.", is_active: true }
     ]);
     const [savingEmail, setSavingEmail] = useState(false);
+    const [showTestEmailModal, setShowTestEmailModal] = useState(false);
+    const [testEmailRecipient, setTestEmailRecipient] = useState("");
+    const [sendingTestEmail, setSendingTestEmail] = useState(false);
 
     // States for Modals
     const [showAgentModal, setShowAgentModal] = useState(null); // stores agenda object
     const [showEditAgenda, setShowEditAgenda] = useState(null);
     const [showUserModal, setShowUserModal] = useState(false);
     const [showServiceModal, setShowServiceModal] = useState(null); // stores service object for editing
-    const [editingAgenda, setEditingAgenda] = useState({ name: "", description: "", slots_per_hour: 1 });
+    const [editingAgenda, setEditingAgenda] = useState({ name: "", description: "", slots_per_hour: 1, ciudad: "" });
     const [editingService, setEditingService] = useState({
         nombre: "",
         precio_base: 0,
@@ -84,7 +89,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         informacion_ia: ""
     });
 
-    const [newAgenda, setNewAgenda] = useState({ name: "", description: "", slots_per_hour: 1 });
+    const [newAgenda, setNewAgenda] = useState({ name: "", description: "", slots_per_hour: 1, ciudad: "" });
     const [newUser, setNewUser] = useState({
         full_name: "",
         username: "",
@@ -381,7 +386,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             }
 
             alert("Agenda creada con éxito");
-            setNewAgenda({ name: "", description: "", slots_per_hour: 1 });
+            setNewAgenda({ name: "", description: "", slots_per_hour: 1, ciudad: "" });
             setShowEditAgenda(null);
             fetchData();
         } catch (err) {
@@ -574,10 +579,10 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             const payload = {
                 nombre: editingService.nombre,
                 descripcion: editingService.descripcion,
-                precio_base: parseFloat(editingService.precio_base),
+                precio_base: parseFloat(editingService.precio_base || 0),
                 precio_descuento: parseFloat(editingService.precio_descuento || 0),
-                duracion_minutos: parseInt(editingService.duracion_minutos),
-                concurrency: parseInt(editingService.concurrency),
+                duracion_minutos: parseInt(editingService.duracion_minutos || 0),
+                concurrency: parseInt(editingService.concurrency || 1),
                 total_sesiones: parseInt(editingService.total_sesiones || 1),
                 color: editingService.color,
                 image_url: editingService.image_url,
@@ -673,6 +678,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     <div key={ag.id} className="premium-card">
                         <div className="card-badge">{ag.slots_per_hour} cupos/h</div>
                         <h4>{ag.name}</h4>
+                        <p style={{ color: 'var(--accent)', fontWeight: '600', fontSize: '0.85rem', marginBottom: '5px' }}>📍 {ag.ciudad || "Ciudad no definida"}</p>
                         <p>{ag.description || "Sin descripción"}</p>
                         <div className="card-agents">
                             <span>👥 {ag.users?.length || 0} Agentes asignados</span>
@@ -680,7 +686,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <div className="card-actions">
                             <button className="btn-edit" onClick={() => {
                                 setShowEditAgenda(ag);
-                                setEditingAgenda({ name: ag.name, description: ag.description, slots_per_hour: ag.slots_per_hour });
+                                setEditingAgenda({ name: ag.name, description: ag.description, slots_per_hour: ag.slots_per_hour, ciudad: ag.ciudad || "" });
                             }}>⚙️ Editar</button>
                             <button className="btn-secondary" onClick={() => setShowAgentModal(ag)}>👤 Agentes</button>
                             <button className="btn-delete" onClick={() => handleDeleteAgenda(ag.id)}>🗑️</button>
@@ -847,10 +853,9 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             </div>
 
             <div className="config-grid">
-                {/* Horarios logic... (Keeping it similar but styled) */}
                 <div className="premium-card">
                     <h4>Horarios de Atención</h4>
-                    {(userRole === "superuser" || userRole === "admin") ? (
+                    {(userRole === "superuser" || userRole === "admin" || userRole === "owner") ? (
                         <form className="premium-form-v" onSubmit={async (e) => {
                             e.preventDefault();
                             const fd = new FormData(e.target);
@@ -908,26 +913,31 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 🚫 Marcar día como CERRADO
                             </button>
                         </form>
-                    ) : <p className="text-muted" style={{ marginBottom: '15px' }}>Vista de horarios configurada por Admin.</p>}
+                    ) : (
+                        <div className="read-only-notice" style={{ padding: '15px', background: 'rgba(59,130,246,0.1)', borderRadius: '10px', fontSize: '0.85rem', color: 'var(--primary)' }}>
+                            ℹ️ Consultando horarios configurados para la clínica.
+                        </div>
+                    )}
+                </div>
 
-                    <div className="mini-list">
-                        {/* Agrupar por dia para mostrar los cerrados */}
-                        {[0, 1, 2, 3, 4, 5, 6].map(d => {
-                            const diaHorarios = horarios.filter(h => h.dia_semana === d);
-                            const diaNombre = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"][d];
-                            return (
-                                <div key={d} className={`schedule-day-row ${diaHorarios.length === 0 ? 'inactive-day' : 'active-day'}`}>
-                                    <div className="day-info">
-                                        <strong>{diaNombre}</strong>
-                                        <span className={`status-pill ${diaHorarios.length > 0 ? 'open' : 'closed'}`}>
-                                            {diaHorarios.length > 0 ? 'Operativo' : 'Sin horario (Cerrado)'}
-                                        </span>
-                                    </div>
-                                    <div className="day-ranges">
-                                        {diaHorarios.map(h => (
-                                            <div key={h.id} className="mini-item-inline range-badge">
-                                                <span>{h.hora_inicio}-{h.hora_fin}</span>
-                                                <small>{agendas.find(a => a.id === h.agenda_id)?.name}</small>
+                <div className="mini-list">
+                    {[0, 1, 2, 3, 4, 5, 6].map(d => {
+                        const diaHorarios = horarios.filter(h => h.dia_semana === d);
+                        const diaNombre = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"][d];
+                        return (
+                            <div key={d} className={`schedule-day-row ${diaHorarios.length === 0 ? 'inactive-day' : 'active-day'}`}>
+                                <div className="day-info">
+                                    <strong>{diaNombre}</strong>
+                                    <span className={`status-pill ${diaHorarios.length > 0 ? 'open' : 'closed'}`}>
+                                        {diaHorarios.length > 0 ? 'Operativo' : 'Sin horario (Cerrado)'}
+                                    </span>
+                                </div>
+                                <div className="day-ranges">
+                                    {diaHorarios.map(h => (
+                                        <div key={h.id} className="mini-item-inline range-badge">
+                                            <span>{h.hora_inicio}-{h.hora_fin}</span>
+                                            <small>{agendas.find(a => a.id === h.agenda_id)?.name}</small>
+                                            {(userRole === "superuser" || userRole === "admin" || userRole === "owner") && (
                                                 <div className="mini-item-actions">
                                                     <button className="btn-edit-tiny" onClick={() => setDuplicateHorario(h)} title="Duplicar a otro día">📑</button>
                                                     <button className="btn-edit-tiny" onClick={() => setEditingGeneralHour(h)}>✏️</button>
@@ -936,13 +946,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                                         fetchData();
                                                     }}>×</button>
                                                 </div>
-                                            </div>
-                                        ))}
-                                    </div>
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
-                            );
-                        })}
-                    </div>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
         </div>
@@ -973,29 +983,35 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     </select>
 
                     {selectedAgendaForOffers && (
-                        <div className="mini-form" style={{ display: 'flex', gap: '10px', flex: 2 }}>
-                            <select id="offer-service-select" className="custom-file-input" style={{ flex: 1 }}>
-                                <option value="">-- Añadir del Catálogo Maestro --</option>
-                                {globalServices
-                                    .filter(gs => {
-                                        // No mostrar si ya está en esta agenda
-                                        if (agendaOffers.some(ao => ao.service_id === gs.id)) return false;
-                                        // Superadmin/Owner ve todo el resto
-                                        if ((userRole === "superuser" || userRole === "owner")) return true;
-                                        // Admin ve solo si está en alguna de sus agendas
-                                        return allAgendaServices.some(as => as.service_id === gs.id && agendas.some(ag => ag.id === as.agenda_id));
-                                    })
-                                    .map(gs => (
-                                        <option key={gs.id} value={gs.id}>{gs.nombre} (${gs.precio_base.toLocaleString()})</option>
-                                    ))}
-                            </select>
-                            <button className="btn-process" onClick={async () => {
-                                const sid = document.getElementById("offer-service-select").value;
-                                if (!sid) return;
-                                const { error } = await supabase.from('agenda_services').insert({ agenda_id: selectedAgendaForOffers.id, service_id: parseInt(sid) });
-                                if (!error) fetchData();
-                            }}>+ Asignar</button>
-                        </div>
+                        (userRole === "superuser" || userRole === "admin" || userRole === "owner") ? (
+                            <div className="mini-form" style={{ display: 'flex', gap: '10px', flex: 2 }}>
+                                <select id="offer-service-select" className="custom-file-input" style={{ flex: 1 }}>
+                                    <option value="">-- Añadir del Catálogo Maestro --</option>
+                                    {globalServices
+                                        .filter(gs => {
+                                            // No mostrar si ya está en esta agenda
+                                            if (agendaOffers.some(ao => ao.service_id === gs.id)) return false;
+                                            // Superadmin/Owner ve todo el resto
+                                            if ((userRole === "superuser" || userRole === "owner")) return true;
+                                            // Admin ve solo si está en alguna de sus agendas
+                                            return allAgendaServices.some(as => as.service_id === gs.id && agendas.some(ag => ag.id === as.agenda_id));
+                                        })
+                                        .map(gs => (
+                                            <option key={gs.id} value={gs.id}>{gs.nombre} (${gs.precio_base.toLocaleString()})</option>
+                                        ))}
+                                </select>
+                                <button className="btn-process" onClick={async () => {
+                                    const sid = document.getElementById("offer-service-select").value;
+                                    if (!sid) return;
+                                    const { error } = await supabase.from('agenda_services').insert({ agenda_id: selectedAgendaForOffers.id, service_id: parseInt(sid) });
+                                    if (!error) fetchData();
+                                }}>+ Asignar</button>
+                            </div>
+                        ) : (
+                            <div style={{ flex: 2, padding: '10px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--glass-border)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                ℹ️ Visualizando servicios asignados a esta agenda.
+                            </div>
+                        )
                     )}
                 </div>
 
@@ -1019,20 +1035,24 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <input
                                         type="number"
                                         defaultValue={off.precio_final}
-                                        style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'white', textAlign: 'right' }}
+                                        readOnly={!(userRole === "superuser" || userRole === "admin" || userRole === "owner")}
+                                        style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'white', textAlign: 'right', cursor: (!(userRole === "superuser" || userRole === "admin" || userRole === "owner")) ? 'default' : 'text' }}
                                         onBlur={async (e) => {
+                                            if (!(userRole === "superuser" || userRole === "admin" || userRole === "owner")) return;
                                             const val = parseFloat(e.target.value);
                                             if (val === off.precio_final) return;
                                             await supabase.from('agenda_services').update({ precio_final: val }).eq('id', off.id);
                                             fetchData();
                                         }}
                                     />
-                                    <button className="btn-delete-tiny" onClick={async () => {
-                                        if (confirm("¿Desvincular este servicio de la agenda?")) {
-                                            await supabase.from('agenda_services').delete().eq('id', off.id);
-                                            fetchData();
-                                        }
-                                    }}>×</button>
+                                    {(userRole === "superuser" || userRole === "admin" || userRole === "owner") && (
+                                        <button className="btn-delete-tiny" onClick={async () => {
+                                            if (confirm("¿Desvincular este servicio de la agenda?")) {
+                                                await supabase.from('agenda_services').delete().eq('id', off.id);
+                                                fetchData();
+                                            }
+                                        }}>×</button>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -1044,7 +1064,25 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             <div className="master-catalog-section">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                     <h4 style={{ margin: 0 }}>🌟 Catálogo Maestro (Global)</h4>
-                    {(userRole === "superuser" || userRole === "owner") && <button className="btn-process" onClick={() => setShowServiceModal({ id: 'new' })}>+ Nuevo Servicio</button>}
+                    {(userRole === "superuser" || userRole === "owner") && (
+                        <button className="btn-process" onClick={() => {
+                            setEditingService({
+                                nombre: "",
+                                precio_base: 0,
+                                precio_descuento: 0,
+                                duracion_minutos: 30,
+                                concurrency: 1,
+                                total_sesiones: 1,
+                                color: "#3b82f6",
+                                image_url: "",
+                                descripcion: "",
+                                parent_id: null,
+                                es_paquete: false,
+                                informacion_ia: ""
+                            });
+                            setShowServiceModal({ id: 'new' });
+                        }}>+ Nuevo Servicio</button>
+                    )}
                 </div>
 
                 <div className="service-premium-grid">
@@ -1069,7 +1107,20 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         <div className="service-card-body">
                                             <div className="service-title-row">
                                                 <h5>{s.nombre} {s.es_paquete && <span className="package-badge">📦 Paquete</span>}</h5>
-                                                <span className="price-tag">${s.precio_base.toLocaleString()}</span>
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                                    {s.precio_descuento > 0 ? (
+                                                        <>
+                                                            <span className="price-tag" style={{ color: 'var(--accent)', fontWeight: '800' }}>
+                                                                ${s.precio_descuento.toLocaleString()}
+                                                            </span>
+                                                            <span style={{ fontSize: '0.7rem', textDecoration: 'line-through', opacity: 0.5 }}>
+                                                                ${s.precio_base.toLocaleString()}
+                                                            </span>
+                                                        </>
+                                                    ) : (
+                                                        <span className="price-tag">${s.precio_base.toLocaleString()}</span>
+                                                    )}
+                                                </div>
                                             </div>
                                             <p className="service-desc">{s.descripcion || "Sin descripción proporcionada."}</p>
                                             <div className="service-meta">
@@ -1082,6 +1133,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                                         setEditingService({
                                                             nombre: s.nombre,
                                                             precio_base: s.precio_base,
+                                                            precio_descuento: s.precio_descuento || 0,
                                                             duracion_minutos: s.duracion_minutos,
                                                             concurrency: s.concurrency || 1,
                                                             total_sesiones: s.total_sesiones || 1,
@@ -1119,7 +1171,20 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                                     <div className="service-card-body" style={{ padding: '10px 15px' }}>
                                                         <div className="service-title-row" style={{ marginBottom: '5px' }}>
                                                             <h6 style={{ margin: 0 }}>📦 {p.nombre}</h6>
-                                                            <span className="price-tag" style={{ fontSize: '0.9rem' }}>${p.precio_base.toLocaleString()}</span>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                                                {p.precio_descuento > 0 ? (
+                                                                    <>
+                                                                        <span className="price-tag" style={{ color: 'var(--accent)', fontWeight: '800', fontSize: '0.9rem' }}>
+                                                                            ${p.precio_descuento.toLocaleString()}
+                                                                        </span>
+                                                                        <span style={{ fontSize: '0.65rem', textDecoration: 'line-through', opacity: 0.5 }}>
+                                                                            ${p.precio_base.toLocaleString()}
+                                                                        </span>
+                                                                    </>
+                                                                ) : (
+                                                                    <span className="price-tag" style={{ fontSize: '0.9rem' }}>${p.precio_base.toLocaleString()}</span>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                         <div className="service-meta" style={{ fontSize: '0.75rem', marginBottom: '8px' }}>
                                                             <span>📅 {p.total_sesiones} sesiones</span>
@@ -1131,6 +1196,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                                                     setEditingService({
                                                                         nombre: p.nombre,
                                                                         precio_base: p.precio_base,
+                                                                        precio_descuento: p.precio_descuento || 0,
                                                                         duracion_minutos: p.duracion_minutos,
                                                                         concurrency: p.concurrency || 1,
                                                                         total_sesiones: p.total_sesiones || 1,
@@ -1161,8 +1227,21 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             <div key={s.id} className="service-card-v2 orphan-package" style={{ borderTop: `4px solid #94a3b8`, opacity: 0.7 }}>
                                 <div className="service-card-body">
                                     <div className="service-title-row">
-                                        <h5>📦 {s.nombre} (Huerfano)</h5>
-                                        <span className="price-tag">${s.precio_base.toLocaleString()}</span>
+                                        <h5>{s.nombre}</h5>
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                            {s.precio_descuento > 0 ? (
+                                                <>
+                                                    <span className="price-tag" style={{ color: 'var(--accent)', fontWeight: '800' }}>
+                                                        ${s.precio_descuento.toLocaleString()}
+                                                    </span>
+                                                    <span style={{ fontSize: '0.7rem', textDecoration: 'line-through', opacity: 0.5 }}>
+                                                        ${s.precio_base.toLocaleString()}
+                                                    </span>
+                                                </>
+                                            ) : (
+                                                <span className="price-tag">${s.precio_base.toLocaleString()}</span>
+                                            )}
+                                        </div>
                                     </div>
                                     <button className="btn-edit-v2" onClick={() => {
                                         setEditingService({ ...s, informacion_ia: s.informacion_ia || "" });
@@ -1252,6 +1331,36 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
     };
 
+    const handleSendTestEmail = async (e) => {
+        e.preventDefault();
+        if (!testEmailRecipient) return alert("Ingresa un correo destinatario");
+
+        setSendingTestEmail(true);
+        try {
+            const { data, error } = await supabase.functions.invoke('send-email-hostinger', {
+                body: {
+                    clinicId: clinicId,
+                    to: testEmailRecipient,
+                    subject: "AndoCRM - Prueba de Conexión SES",
+                    body: "<h3>¡Éxito!</h3><p>Tus credenciales de Amazon SES han sido configuradas correctamente en AndoCRM. Ahora puedes enviar notificaciones a tus pacientes.</p>",
+                    patientName: "Administrador"
+                }
+            });
+
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
+
+            alert("✅ Correo de prueba enviado con éxito. Revisa tu bandeja de entrada (y la de Spam).");
+            setShowTestEmailModal(false);
+            setTestEmailRecipient("");
+        } catch (err) {
+            console.error(err);
+            alert("❌ Fallo en el envío de prueba: " + err.message);
+        } finally {
+            setSendingTestEmail(false);
+        }
+    };
+
     const renderSMS = () => (
         <div className="admin-section fade-in">
             <div className="section-header">
@@ -1319,9 +1428,16 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         <div className="admin-section fade-in">
             <div className="section-header">
                 <div>
-                    <h1>📧 Configuración de Email (SMTP Hostinger)</h1>
+                    <h1>📧 Configuración de Email (Amazon SES / SMTP)</h1>
                     <p>Configura tus credenciales de correo para enviar confirmaciones automáticas.</p>
                 </div>
+                <button
+                    className="btn-secondary"
+                    onClick={() => setShowTestEmailModal(true)}
+                    style={{ background: 'rgba(var(--primary-rgb), 0.1)', border: '1px solid var(--primary)', display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                    🧪 Enviar Prueba
+                </button>
             </div>
 
             <div className="config-grid">
@@ -1337,7 +1453,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 type="text"
                                 value={emailConfig.smtp_host}
                                 onChange={e => setEmailConfig({ ...emailConfig, smtp_host: e.target.value })}
-                                placeholder="smtp.hostinger.com"
+                                placeholder="smtp.hostinger.com o email-smtp.us-east-1.amazonaws.com"
                                 required
                             />
                         </div>
@@ -1364,12 +1480,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             </div>
                         </div>
                         <div className="form-group">
-                            <label>Usuario (Email)</label>
+                            <label>Usuario SMTP (Email o Código IAM)</label>
                             <input
-                                type="email"
+                                type="text"
                                 value={emailConfig.smtp_user}
                                 onChange={e => setEmailConfig({ ...emailConfig, smtp_user: e.target.value })}
-                                placeholder="tu@dominio.com"
+                                placeholder="tu@dominio.com o AKIA..."
                                 required
                             />
                         </div>
@@ -1632,23 +1748,25 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
             const resolvedCampsMap = {};
             filteredAdsets.forEach(a => {
-                const pId = a.parent_id;
-                if (!pId) return;
-                if (!resolvedCampsMap[pId]) {
-                    const baseCamp = campaigns.find(c => c.campaign_id === pId);
-                    if (baseCamp) {
-                        resolvedCampsMap[pId] = { ...baseCamp, spend: 0, impressions: 0, clicks: 0, conversations_count: 0 };
-                    } else {
-                        resolvedCampsMap[pId] = {
-                            campaign_id: pId, campaign_name: "Campaña (Detalle)", entity_type: 'campaign',
-                            spend: 0, impressions: 0, clicks: 0, conversations_count: 0, status: a.status, ad_account_id: a.ad_account_id
+                if (!resolvedCampsMap[a.parent_id]) {
+                    const parent = campaigns.find(c => c.campaign_id === a.parent_id);
+                    if (parent) {
+                        resolvedCampsMap[a.parent_id] = {
+                            ...parent,
+                            spend: 0,
+                            impressions: 0,
+                            clicks: 0,
+                            conversations_count: 0,
+                            is_reconstructed: true
                         };
                     }
                 }
-                resolvedCampsMap[pId].spend += parseFloat(a.spend || 0);
-                resolvedCampsMap[pId].impressions += parseInt(a.impressions || 0);
-                resolvedCampsMap[pId].clicks += parseInt(a.clicks || 0);
-                resolvedCampsMap[pId].conversations_count += parseInt(a.conversations_count || 0);
+                if (resolvedCampsMap[a.parent_id]) {
+                    resolvedCampsMap[a.parent_id].spend += parseFloat(a.spend || 0);
+                    resolvedCampsMap[a.parent_id].impressions += (a.impressions || 0);
+                    resolvedCampsMap[a.parent_id].clicks += (a.clicks || 0);
+                    resolvedCampsMap[a.parent_id].conversations_count += (a.conversations_count || 0);
+                }
             });
 
             // Incluir campañas mapeadas directamente o que no se reconstruyeron pero pasan filtros
@@ -1702,6 +1820,53 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }), { spend: 0, impressions: 0, clicks: 0, conversations: 0 });
 
         const cpa = totals.conversations > 0 ? (totals.spend / totals.conversations) : 0;
+
+        const handleSaveView = () => {
+            if (!newViewName.trim()) return alert("Ingresa un nombre para la vista");
+            const view = {
+                name: newViewName,
+                accounts: metaAccountFilter,
+                status: metaStatusFilter,
+                start: metaStartDate,
+                end: metaEndDate
+            };
+            const updated = [...savedViews, view];
+            setSavedViews(updated);
+            localStorage.setItem("meta_saved_views", JSON.stringify(updated));
+            setNewViewName("");
+        };
+
+        const applyView = (v) => {
+            setMetaAccountFilter(v.accounts);
+            setMetaStatusFilter(v.status);
+            setMetaStartDate(v.start);
+            setMetaEndDate(v.end);
+        };
+
+        const deleteView = (name) => {
+            const updated = savedViews.filter(v => v.name !== name);
+            setSavedViews(updated);
+            localStorage.setItem("meta_saved_views", JSON.stringify(updated));
+        };
+
+        // --- CALCULAR RENDIMIENTO POR AGENDA ---
+        const agendaPerformance = agendas.map(ag => {
+            const mappedCampaignIds = metaMappings
+                .filter(m => m.agenda_id === ag.id && m.meta_entity_type === 'campaign')
+                .map(m => m.meta_entity_id);
+
+            const agCampaigns = filteredCampaigns.filter(c => mappedCampaignIds.includes(c.entity_id || c.campaign_id));
+
+            return {
+                agenda: ag,
+                metrics: agCampaigns.reduce((sum, c) => ({
+                    spend: sum.spend + parseFloat(c.spend || 0),
+                    conversations: sum.conversations + (c.conversations_count || 0),
+                    clicks: sum.clicks + (c.clicks || 0),
+                    campaigns_count: sum.campaigns_count + 1
+                }), { spend: 0, conversations: 0, clicks: 0, campaigns_count: 0 })
+            };
+        }).filter(p => p.metrics.campaigns_count > 0);
 
         return (
             <div className="admin-section fade-in">
@@ -1908,15 +2073,49 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 </div>
                             </div>
 
-                            <div className="filter-group" style={{ display: 'flex', gap: '15px', alignItems: 'center', flexDirection: 'row', flex: '1 1 300px' }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Desde</label>
-                                    <input type="date" value={metaStartDate} onChange={(e) => setMetaStartDate(e.target.value)} style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', background: '#ffffff', color: '#333', fontWeight: '600', fontSize: '0.8rem' }} />
+                            <div className="filter-group" style={{
+                                flex: '1 1 300px',
+                                background: 'rgba(255,255,255,0.05)',
+                                padding: '10px 15px',
+                                borderRadius: '12px',
+                                border: '1px solid var(--glass-border)',
+                                display: 'grid',
+                                gridTemplateColumns: 'auto 1fr 1fr',
+                                gap: '15px',
+                                alignItems: 'center'
+                            }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>Periodo:</label>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <small style={{ fontSize: '0.65rem', opacity: 0.6 }}>Desde</small>
+                                    <input type="date" value={metaStartDate} onChange={(e) => setMetaStartDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '0.85rem', outline: 'none', borderBottom: '1px solid rgba(255,255,255,0.1)' }} />
                                 </div>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Hasta</label>
-                                    <input type="date" value={metaEndDate} onChange={(e) => setMetaEndDate(e.target.value)} style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', background: '#ffffff', color: '#333', fontWeight: '600', fontSize: '0.8rem' }} />
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <small style={{ fontSize: '0.65rem', opacity: 0.6 }}>Hasta</small>
+                                    <input type="date" value={metaEndDate} onChange={(e) => setMetaEndDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '0.85rem', outline: 'none', borderBottom: '1px solid rgba(255,255,255,0.1)' }} />
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* ROW 2.5: SAVED VIEWS */}
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', gap: '5px', background: 'rgba(255,255,255,0.05)', padding: '5px 10px', borderRadius: '10px', border: '1px solid var(--glass-border)' }}>
+                                <input
+                                    type="text"
+                                    placeholder="Nombre de la vista..."
+                                    value={newViewName}
+                                    onChange={e => setNewViewName(e.target.value)}
+                                    style={{ background: 'transparent', border: 'none', color: 'white', fontSize: '0.85rem', outline: 'none', width: '150px' }}
+                                />
+                                <button className="btn-process" onClick={handleSaveView} style={{ padding: '5px 10px', fontSize: '0.75rem' }}>💾 Guardar</button>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '5px' }}>
+                                {savedViews.map(v => (
+                                    <div key={v.name} style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(var(--primary-rgb), 0.1)', padding: '5px 12px', borderRadius: '20px', border: '1px solid var(--primary)', cursor: 'pointer' }} onClick={() => applyView(v)}>
+                                        <span style={{ fontSize: '0.8rem' }}>📌 {v.name}</span>
+                                        <button onClick={(e) => { e.stopPropagation(); deleteView(v.name); }} style={{ background: 'transparent', border: 'none', color: 'var(--danger)', fontSize: '0.9rem', cursor: 'pointer', paddingLeft: '5px' }}>×</button>
+                                    </div>
+                                ))}
                             </div>
                         </div>
 
@@ -2049,6 +2248,58 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     })
                                 )}
                             </div>
+                        </div>
+                    </div>
+
+                    {/* PERFORMANCE BY AGENDA SECTION */}
+                    <div className="card" style={{ padding: '25px', width: '100%' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '1.4rem', color: 'var(--primary)' }}>📈 Rendimiento por Agenda</h3>
+                                <p className="text-muted" style={{ fontSize: '0.85rem' }}>Resumen financiero de las campañas vinculadas a cada agenda.</p>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+                            {agendaPerformance.map(perf => (
+                                <div key={perf.agenda.id} className="card-v4" style={{
+                                    background: 'rgba(255,255,255,0.03)',
+                                    borderRadius: '20px',
+                                    padding: '20px',
+                                    border: '1px solid var(--glass-border)',
+                                    position: 'relative',
+                                    overflow: 'hidden'
+                                }}>
+                                    <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--primary)' }}></div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
+                                        <h4 style={{ margin: 0, fontSize: '1.1rem' }}>📅 {perf.agenda.name}</h4>
+                                        <span className="pro-badge" style={{ fontSize: '0.65rem' }}>{perf.metrics.campaigns_count} Campañas</span>
+                                    </div>
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                                        <div style={{ background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+                                            <small style={{ fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Inversión</small>
+                                            <strong style={{ fontSize: '1rem' }}>{formatCOP(perf.metrics.spend)}</strong>
+                                        </div>
+                                        <div style={{ background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+                                            <small style={{ fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Leads / Conv.</small>
+                                            <strong style={{ fontSize: '1.2rem', color: '#10b981' }}>{perf.metrics.conversations}</strong>
+                                        </div>
+                                    </div>
+
+                                    <div style={{ marginTop: '15px', padding: '10px 15px', background: 'rgba(var(--primary-rgb), 0.1)', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Costo por Lead:</span>
+                                        <strong style={{ color: 'var(--primary)', fontSize: '0.9rem' }}>
+                                            {perf.metrics.conversations > 0 ? formatCOP(perf.metrics.spend / perf.metrics.conversations) : '-'}
+                                        </strong>
+                                    </div>
+                                </div>
+                            ))}
+                            {agendaPerformance.length === 0 && (
+                                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '40px', background: 'rgba(255,255,255,0.01)', borderRadius: '15px', border: '1px dashed var(--glass-border)' }}>
+                                    <p className="text-muted">No hay campañas vinculadas a agendas activas en este periodo.</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -2246,10 +2497,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     <button className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}>👥 <span className="sidebar-text">Personal</span></button>
                     <button className={activeView === "bloqueos" ? "active" : ""} onClick={() => setActiveView("bloqueos")}>🚫 <span className="sidebar-text">Bloqueos</span></button>
                     <button className={activeView === "alertas" ? "active" : ""} onClick={() => setActiveView("alertas")}>🔔 <span className="sidebar-text">Alertas</span></button>
+                    <button className={activeView === "servicios" ? "active" : ""} onClick={() => setActiveView("servicios")}>🛒 <span className="sidebar-text">Servicios</span></button>
+                    <button className={activeView === "horarios" ? "active" : ""} onClick={() => setActiveView("horarios")}>🕒 <span className="sidebar-text">Horarios</span></button>
+
                     {(userRole === "superuser" || userRole === "admin" || userRole === "owner") && (
                         <>
-                            <button className={activeView === "servicios" ? "active" : ""} onClick={() => setActiveView("servicios")}>🛒 <span className="sidebar-text">Servicios</span></button>
-                            <button className={activeView === "horarios" ? "active" : ""} onClick={() => setActiveView("horarios")}>🕒 <span className="sidebar-text">Horarios</span></button>
                             {(userRole === "superuser" || userRole === "owner") && (
                                 <>
                                     <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 <span className="sidebar-text">SMS Automatizados</span></button>
@@ -2282,6 +2534,40 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "superconfig" && renderSuperConfig()}
                 </div>
             </main>
+
+            {/* MODAL: TEST EMAIL */}
+            {showTestEmailModal && (
+                <div className="modal-overlay" onClick={() => setShowTestEmailModal(false)}>
+                    <div className="modal-content premium-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '450px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <h2 style={{ margin: 0 }}>🧪 Enviar Correo de Prueba</h2>
+                            <button className="btn-close" onClick={() => setShowTestEmailModal(false)}>×</button>
+                        </div>
+                        <p className="text-muted" style={{ marginBottom: '20px' }}>
+                            Ingresa un correo para verificar que la configuración de Amazon SES funciona.
+                            <strong> Nota:</strong> Si estás en el Sandbox de SES, el destinatario también debe estar verificado.
+                        </p>
+                        <form onSubmit={handleSendTestEmail} className="premium-form-v">
+                            <div className="form-group">
+                                <label>Correo Destinatario</label>
+                                <input
+                                    type="email"
+                                    value={testEmailRecipient}
+                                    onChange={e => setTestEmailRecipient(e.target.value)}
+                                    placeholder="ejemplo@correo.com"
+                                    required
+                                />
+                            </div>
+                            <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                                <button type="submit" className="btn-process" style={{ flex: 1 }} disabled={sendingTestEmail}>
+                                    {sendingTestEmail ? "Enviando..." : "🚀 Enviar Prueba ahora"}
+                                </button>
+                                <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={() => setShowTestEmailModal(false)}>Cancelar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL: META SETUP GUIDE */}
             {showMetaGuide && createPortal(
@@ -2455,6 +2741,18 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         ? setNewAgenda({ ...newAgenda, slots_per_hour: parseInt(e.target.value) })
                                         : setEditingAgenda({ ...editingAgenda, slots_per_hour: parseInt(e.target.value) })}
                                     min="1"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>📍 Ciudad / Sucursal</label>
+                                <input
+                                    type="text"
+                                    placeholder="Ej: Bogotá, Medellín, Miami..."
+                                    value={showEditAgenda.id === 'new' ? newAgenda.ciudad : editingAgenda.ciudad}
+                                    onChange={e => showEditAgenda.id === 'new'
+                                        ? setNewAgenda({ ...newAgenda, ciudad: e.target.value })
+                                        : setEditingAgenda({ ...editingAgenda, ciudad: e.target.value })}
+                                    required
                                 />
                             </div>
                             <div className="modal-footer">

@@ -84,11 +84,11 @@ const AiAgentSection = ({ clinicId }) => {
                     clinic_id: clinicId,
                     provider: config.provider,
                     api_key: config.api_key,
-                    model: config.model || 'gpt-4o',
+                    model: config.model || 'gpt-4o-mini',
                     system_prompt: config.system_prompt
                 }, { onConflict: 'clinic_id' });
             if (error) throw error;
-            alert("Cerebro de IA guardado con éxito.");
+            alert("🧠 Cerebro de IA guardado con éxito.");
         } catch (err) {
             alert("Error: " + err.message);
         } finally {
@@ -99,10 +99,6 @@ const AiAgentSection = ({ clinicId }) => {
     const handleTestMessage = async (e) => {
         e.preventDefault();
         if (!testInput.trim() || isThinking) return;
-        if (!config.api_key) {
-            alert("Por favor, ingresa una API Key de la IA para probar.");
-            return;
-        }
 
         const userMsg = { role: 'user', content: testInput };
         const newHistory = [...testChat, userMsg];
@@ -111,42 +107,41 @@ const AiAgentSection = ({ clinicId }) => {
         setIsThinking(true);
 
         try {
-            // Local Simulation to avoid Edge Function deployment issues during dev
-            const servicesText = services.length
-                ? `\n\nSERVICIOS DISPONIBLES EN LA CLÍNICA:\n${services.map(s => {
-                    const parent = s.parent_id ? services.find(p => p.id === s.parent_id) : null;
-                    const name = parent ? `${s.nombre} (Variante de ${parent.nombre})` : s.nombre;
-                    const detailIa = s.informacion_ia ? `\n   - INFO EXPERTA/DETALLES: ${s.informacion_ia}` : '';
-                    return `- ${name}: $${s.precio_base} (${s.duracion_minutos} min). ${s.descripcion || ''}${detailIa}`;
-                }).join('\n')}`
-                : '';
+            // CALL THE ACTUAL EDGE FUNCTION IN TEST MODE (With history for memory)
+            const historyForAi = newHistory.map(m => ({
+                sender_type: m.role === 'user' ? 'user' : 'ai',
+                content: m.content
+            }));
 
-            const systemContent = config.system_prompt + servicesText;
-
-            const messages = [
-                { role: 'system', content: systemContent },
-                ...newHistory.slice(-5) // Send last 5 messages for context
-            ];
-
-            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/meta-ai-agent`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${config.api_key}`
+                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
                 },
                 body: JSON.stringify({
-                    model: config.model || 'gpt-4o',
-                    messages: messages
+                    is_test: true,
+                    text: userMsg.content,
+                    clinic_id: clinicId,
+                    history: historyForAi
                 })
             });
 
             const data = await response.json();
-            if (data.error) throw new Error(data.error.message);
+            if (data.error) throw new Error(data.error);
 
-            const aiMsg = { role: 'assistant', content: data.choices[0].message.content };
-            setTestChat(prev => [...prev, aiMsg]);
+            // Split messages to simulate real WhatsApp behavior (double messaging)
+            const parts = data.aiResponse.split('||').map(p => p.trim()).filter(p => p.length > 0);
+
+            for (let i = 0; i < parts.length; i++) {
+                if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
+                setTestChat(prev => [...prev, { role: 'assistant', content: parts[i] }]);
+            }
         } catch (err) {
-            setTestChat(prev => [...prev, { role: 'assistant', content: "❌ Error: " + err.message }]);
+            console.error("Test Error:", err);
+            let msg = err.message;
+            if (msg === "Failed to fetch") msg = "No se pudo conectar con la función. ¿La has desplegado con 'supabase functions deploy meta-ai-agent'?";
+            setTestChat(prev => [...prev, { role: 'assistant', content: "❌ Error: " + msg }]);
         } finally {
             setIsThinking(false);
         }
@@ -172,7 +167,7 @@ const AiAgentSection = ({ clinicId }) => {
                             <label>WhatsApp Phone ID</label>
                             <input
                                 type="text"
-                                value={config.phone_id}
+                                value={config.phone_id || ""}
                                 onChange={e => setConfig({ ...config, phone_id: e.target.value })}
                                 placeholder="Ej: 1092837465..."
                             />
@@ -181,7 +176,7 @@ const AiAgentSection = ({ clinicId }) => {
                             <label>Meta Access Token</label>
                             <input
                                 type="password"
-                                value={config.meta_access_token}
+                                value={config.meta_access_token || ""}
                                 onChange={e => setConfig({ ...config, meta_access_token: e.target.value })}
                                 placeholder="EAA..."
                             />
@@ -190,7 +185,7 @@ const AiAgentSection = ({ clinicId }) => {
                             <label>Webhook Verify Token</label>
                             <input
                                 type="text"
-                                value={config.verify_token}
+                                value={config.verify_token || ""}
                                 onChange={e => setConfig({ ...config, verify_token: e.target.value })}
                                 placeholder="token_secreto_para_meta"
                             />
@@ -227,7 +222,7 @@ const AiAgentSection = ({ clinicId }) => {
                             <label>API Key de la IA</label>
                             <input
                                 type="password"
-                                value={config.api_key}
+                                value={config.api_key || ""}
                                 onChange={e => setConfig({ ...config, api_key: e.target.value })}
                                 placeholder="sk-..."
                             />
@@ -236,7 +231,7 @@ const AiAgentSection = ({ clinicId }) => {
                             <label>Modelo</label>
                             <input
                                 type="text"
-                                value={config.model}
+                                value={config.model || ""}
                                 onChange={e => setConfig({ ...config, model: e.target.value })}
                                 placeholder="gpt-4o"
                             />
@@ -244,7 +239,7 @@ const AiAgentSection = ({ clinicId }) => {
                         <div className="form-group">
                             <label>System Prompt (Instrucciones)</label>
                             <textarea
-                                value={config.system_prompt}
+                                value={config.system_prompt || ""}
                                 onChange={e => setConfig({ ...config, system_prompt: e.target.value })}
                                 rows="5"
                                 placeholder="Define cómo debe responder la IA..."
