@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../supabase";
+import AndoLogo from "../assets/logoAndoCrm.png";
 import "../login_premium.css";
 
 const Login = ({ onLoginSuccess }) => {
@@ -133,7 +134,7 @@ const Login = ({ onLoginSuccess }) => {
         <div className="login-container">
             <div className="login-card">
                 <div className="login-brand">
-                    <img src="/andocrm.svg" alt="AndoCRM Logo" style={{ width: '80px', height: '80px', marginBottom: '15px' }} />
+                    <img src={AndoLogo} alt="AndoCRM Logo" style={{ width: '100px', height: '100px', marginBottom: '15px', objectFit: 'contain' }} />
                     <h1>AndoCRM</h1>
                     <p>Gestión Inteligente</p>
                 </div>

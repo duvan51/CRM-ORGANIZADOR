@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { supabase } from "./supabase";
+import AndoLogo from "./assets/logoAndoCrm.png";
 import "./index.css";
 import "./confirmation_pro.css";
 import "./sales.css";
@@ -571,7 +572,7 @@ function App() {
       <header className="header">
         <div className="header-top">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <img src="/andocrm.svg" alt="AndoCRM Logo" style={{ width: '32px', height: '32px' }} />
+            <img src={AndoLogo} alt="AndoCRM Logo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
             <h1 style={{ margin: 0 }}>AndoCRM</h1>
           </div>
           <div className="header-controls">
