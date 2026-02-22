@@ -1312,6 +1312,7 @@ tr:hover td {
   border-right: 1px solid var(--glass-border);
   flex-shrink: 0;
   z-index: 10;
+  height: 100%;
 }
 
 @media (max-width: 991px) {
@@ -1359,6 +1360,26 @@ tr:hover td {
   flex-direction: column;
   gap: 10px;
   flex: 1;
+  overflow-y: auto;
+  padding-right: 5px;
+  /* Space for scrollbar */
+}
+
+.admin-sidebar nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.admin-sidebar nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-sidebar nav::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.admin-sidebar nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 @media (max-width: 991px) {

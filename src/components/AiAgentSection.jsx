@@ -30,17 +30,22 @@ const AiAgentSection = ({ clinicId }) => {
 
     const fetchConfig = async () => {
         try {
-            const { data, error } = await supabase
+            // Especificamos columnas para evitar el error 406
+            const { data, error, status } = await supabase
                 .from('ai_agent_config')
-                .select('*')
+                .select('id, provider, api_key, model, system_prompt, phone_id, meta_access_token, verify_token, is_active')
                 .eq('clinic_id', clinicId)
-                .single();
+                .maybeSingle();
+
+            if (error && status !== 406) {
+                console.error("Error fetching config:", error);
+            }
 
             if (data) {
                 setConfig(data);
             }
         } catch (err) {
-            console.error(err);
+            console.warn("Fallo fetchConfig (posible tabla no creada):", err);
         } finally {
             setLoading(false);
         }

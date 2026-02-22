@@ -5,6 +5,7 @@ import { supabase } from "../supabase";
 import ConfirmModal from "./ConfirmModal";
 import AiAgentSection from "./AiAgentSection";
 import MetaConnectModal from "./MetaConnectModal";
+import ConversationsManager from "./ConversationsManager";
 import { initFacebookSDK, loginWithFacebook } from "../utils/facebookSDK";
 
 const AdminPanel = ({ token, onBack, userRole }) => {
@@ -1673,7 +1674,9 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 'ads_read',
                 'whatsapp_business_management',
                 'whatsapp_business_messaging',
-                'pages_show_list'
+                'pages_show_list',
+                'pages_messaging',
+                'pages_read_engagement'
             ]);
             setTempMetaToken(authResponse.accessToken);
             setShowMetaConnectModal(true);
@@ -1682,7 +1685,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
     };
 
-    const handleSaveMetaAssets = async ({ business, adAccounts, wabas }) => {
+    const handleSaveMetaAssets = async ({ business, adAccounts, wabas, pages, instagrams }) => {
         setSavingMeta(true);
         try {
             // 1. Guardar Configuración Base (Token y Business ID)
@@ -1706,20 +1709,47 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
             // 3. Guardar Configuración de WhatsApp (si existe al menos una)
             if (wabas.length > 0) {
-                const primaryWaba = wabas[0];
-                const primaryPhone = primaryWaba.phone_numbers?.[0];
+                const primaryWabaSelection = wabas[0];
+                const phoneIdToSave = primaryWabaSelection.phone_id || primaryWabaSelection.phone_numbers?.[0]?.id;
 
-                if (primaryPhone) {
-                    await supabase.from('ai_agent_config').upsert({
+                if (phoneIdToSave) {
+                    const { error: aiError } = await supabase.from('ai_agent_config').upsert({
                         clinic_id: clinicId,
-                        phone_id: primaryPhone.id,
+                        phone_id: phoneIdToSave,
                         meta_access_token: tempMetaToken,
-                        is_active: true
+                        is_active: true,
+                        provider: 'openai', // Default
+                        model: 'gpt-4o-mini'
                     }, { onConflict: 'clinic_id' });
+                    if (aiError) console.error("Error guardando config IA:", aiError);
                 }
             }
 
-            alert("✅ ¡Conexión exitosa! Los activos seleccionados han sido vinculados.");
+            // 4. Guardar Páginas e Instagrams
+            for (const page of pages) {
+                const { error: pageError } = await supabase.from('meta_social_accounts').upsert({
+                    clinic_id: clinicId,
+                    account_id: page.id,
+                    name: page.name,
+                    platform: 'messenger',
+                    access_token: page.access_token,
+                    is_active: true
+                }, { onConflict: 'clinic_id,account_id,platform' });
+                if (pageError) console.error("Error guardando página:", pageError);
+            }
+
+            for (const ig of instagrams) {
+                const { error: igError } = await supabase.from('meta_social_accounts').upsert({
+                    clinic_id: clinicId,
+                    account_id: ig.id,
+                    name: ig.username || ig.name,
+                    platform: 'instagram',
+                    is_active: true
+                }, { onConflict: 'clinic_id,account_id,platform' });
+                if (igError) console.error("Error guardando instagram:", igError);
+            }
+
+            alert("✅ ¡Conexión exitosa! Los activos seleccionados (incluyendo Messenger/IG) han sido vinculados.");
             fetchData();
         } catch (err) {
             alert("Error al vincular activos: " + err.message);
@@ -2671,6 +2701,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 <>
                                     <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 <span className="sidebar-text">SMS Automatizados</span></button>
                                     <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 <span className="sidebar-text">Email Automatizados</span></button>
+                                    <button className={activeView === "chats" ? "active" : ""} onClick={() => setActiveView("chats")}>💬 <span className="sidebar-text">Conversaciones</span></button>
                                     <button className={activeView === "ai_agent" ? "active" : ""} onClick={() => setActiveView("ai_agent")}>🤖 <span className="sidebar-text">Agente IA</span></button>
                                     <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
                                 </>
@@ -2693,6 +2724,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "horarios" && renderConfigHorarios()}
                     {activeView === "sms" && renderSMS()}
                     {activeView === "email" && renderEmail()}
+                    {activeView === "chats" && <ConversationsManager clinicId={clinicId} />}
                     {activeView === "ai_agent" && <AiAgentSection clinicId={clinicId} />}
                     {activeView === "meta" && renderMetaConfig()}
                     {activeView === "logs" && renderLogs()}
