@@ -12,6 +12,7 @@ const ConversationsManager = ({ clinicId }) => {
     const [syncedAccounts, setSyncedAccounts] = useState([]);
     const [syncingPastMessages, setSyncingPastMessages] = useState(false);
     const [realtimeStatus, setRealtimeStatus] = useState("connecting");
+    const [syncMode, setSyncMode] = useState(true); // true = auto (live), false = manual
     const messagesEndRef = useRef(null);
     const selectedConvRef = useRef(null);
 
@@ -23,6 +24,7 @@ const ConversationsManager = ({ clinicId }) => {
     useEffect(() => {
         fetchConversations(true);
         fetchSyncedAccounts();
+        fetchSyncMode();
 
         let refreshTimer = null;
         const debouncedRefresh = () => {
@@ -161,6 +163,22 @@ const ConversationsManager = ({ clinicId }) => {
         }
     };
 
+    const fetchSyncMode = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('meta_ads_config')
+                .select('sync_mode')
+                .eq('clinic_id', clinicId)
+                .maybeSingle();
+
+            if (!error && data) {
+                setSyncMode(data.sync_mode);
+            }
+        } catch (err) {
+            console.error("Error fetching sync mode:", err);
+        }
+    };
+
     const handleSendMessage = async (e) => {
         e.preventDefault();
         if (!newMessage.trim() || !selectedConv || sending) return;
@@ -243,51 +261,71 @@ const ConversationsManager = ({ clinicId }) => {
                                     boxShadow: realtimeStatus === 'SUBSCRIBED' ? '0 0 10px #4ade80' : 'none'
                                 }}
                             />
-                            <button
-                                className="btn-sync-mini"
-                                onClick={syncPastMessages}
-                                disabled={syncingPastMessages}
-                                title="Sincronizar historial pasado"
-                                style={{
-                                    background: 'rgba(255,255,255,0.05)',
-                                    border: '1px solid var(--glass-border)',
-                                    borderRadius: '8px',
-                                    padding: '4px 8px',
-                                    cursor: 'pointer',
-                                    fontSize: '0.8rem',
-                                    color: 'var(--text-main)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '5px'
-                                }}
-                            >
-                                {syncingPastMessages ? '...' : '🔄 Sync'}
-                            </button>
                         </div>
                     </div>
 
-                    <div className="synced-accounts" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {syncedAccounts.length === 0 ? (
-                            <small className="text-muted" style={{ fontSize: '0.7rem' }}>⚠️ Sin cuentas vinculadas (Ve a Admin → Meta)</small>
-                        ) : (
-                            syncedAccounts.map(acc => (
-                                <div key={acc.id} style={{
-                                    padding: '4px 8px',
-                                    borderRadius: '6px',
-                                    fontSize: '0.65rem',
-                                    background: acc.platform === 'messenger' ? 'rgba(0, 132, 255, 0.1)' :
-                                        acc.platform === 'instagram' ? 'rgba(225, 48, 108, 0.1)' :
-                                            'rgba(37, 211, 102, 0.1)',
-                                    color: acc.platform === 'messenger' ? '#0084ff' :
-                                        acc.platform === 'instagram' ? '#e1306c' :
-                                            '#25d366',
-                                    fontWeight: 'bold',
-                                    border: '1px solid rgba(255,255,255,0.05)'
-                                }}>
-                                    {acc.platform === 'messenger' ? '🔵' : acc.platform === 'instagram' ? '📸' : '🟢'} {acc.name}
-                                </div>
-                            ))
-                        )}
+                    <div className="synced-accounts" style={{ padding: '15px', borderBottom: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.02)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)' }}>CUENTAS CONECTADAS</h4>
+                                {!syncMode ? (
+                                    <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '10px', background: 'rgba(255, 152, 0, 0.2)', color: '#ff9800', border: '1px solid rgba(255, 152, 0, 0.3)', fontWeight: 'bold' }}>
+                                        MODO MANUAL
+                                    </span>
+                                ) : (
+                                    <div className="live-indicator" style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.7rem', color: realtimeStatus === 'joined' ? '#4ade80' : '#f87171' }}>
+                                        <span className={`pulse-dot ${realtimeStatus === 'joined' ? 'active' : ''}`} style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'currentColor' }}></span>
+                                        {realtimeStatus === 'joined' ? 'LIVE' : 'OFFLINE'}
+                                    </div>
+                                )}
+                            </div>
+                            <button
+                                onClick={syncPastMessages}
+                                disabled={syncingPastMessages}
+                                className="btn-sync-small"
+                                style={{
+                                    padding: !syncMode ? '6px 15px' : '4px 10px',
+                                    fontSize: !syncMode ? '0.85rem' : '0.75rem',
+                                    background: !syncMode ? 'var(--primary)' : 'rgba(var(--primary-rgb), 0.1)',
+                                    color: !syncMode ? 'white' : 'var(--primary)',
+                                    border: '1px solid var(--primary)',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    fontWeight: !syncMode ? 'bold' : 'normal',
+                                    boxShadow: !syncMode ? '0 4px 12px rgba(var(--primary-rgb), 0.3)' : 'none',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                {syncingPastMessages ? '...' : `🔄 ${!syncMode ? 'Sincronizar' : 'Sync'}`}
+                            </button>
+                        </div>
+                        {!syncMode && <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '0 0 10px 0', fontStyle: 'italic' }}>* Los mensajes nuevos aparecerán al dar clic en Sincronizar.</p>}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            {syncedAccounts.length === 0 ? (
+                                <small className="text-muted" style={{ fontSize: '0.7rem' }}>⚠️ Sin cuentas vinculadas (Ve a Admin → Meta)</small>
+                            ) : (
+                                syncedAccounts.map(acc => (
+                                    <div key={acc.id} style={{
+                                        padding: '4px 8px',
+                                        borderRadius: '6px',
+                                        fontSize: '0.65rem',
+                                        background: acc.platform === 'messenger' ? 'rgba(0, 132, 255, 0.1)' :
+                                            acc.platform === 'instagram' ? 'rgba(225, 48, 108, 0.1)' :
+                                                'rgba(37, 211, 102, 0.1)',
+                                        color: acc.platform === 'messenger' ? '#0084ff' :
+                                            acc.platform === 'instagram' ? '#e1306c' :
+                                                '#25d366',
+                                        fontWeight: 'bold',
+                                        border: '1px solid rgba(255,255,255,0.05)'
+                                    }}>
+                                        {acc.platform === 'messenger' ? '🔵' : acc.platform === 'instagram' ? '📸' : '🟢'} {acc.name}
+                                    </div>
+                                ))
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -498,6 +536,31 @@ const ConversationsManager = ({ clinicId }) => {
                 @keyframes spin {
                     from { transform: rotate(0deg); }
                     to { transform: rotate(360deg); }
+                }
+                .status-pulse {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 50%;
+                    position: relative;
+                }
+                .status-pulse.online { background: #10b981; }
+                .status-pulse.connecting { background: #f59e0b; animation: pulse-opacity 1.5s infinite; }
+                .status-pulse.online::after {
+                    content: '';
+                    position: absolute;
+                    top: 0; left: 0; right: 0; bottom: 0;
+                    border-radius: 50%;
+                    background: #10b981;
+                    animation: pulse-ring 2s infinite;
+                }
+                @keyframes pulse-ring {
+                    0% { transform: scale(0.8); opacity: 0.8; }
+                    100% { transform: scale(2.5); opacity: 0; }
+                }
+                @keyframes pulse-opacity {
+                    0% { opacity: 1; }
+                    50% { opacity: 0.3; }
+                    100% { opacity: 1; }
                 }
             ` }} />
         </div>

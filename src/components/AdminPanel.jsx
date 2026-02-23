@@ -26,9 +26,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [clinicId, setClinicId] = useState(null);
 
     // Meta Ads States
-    const [metaConfig, setMetaConfig] = useState({ access_token: '', business_id: '', is_active: true });
+    const [metaConfig, setMetaConfig] = useState({ access_token: '', business_id: '', is_active: true, sync_mode: false });
     const [savingMeta, setSavingMeta] = useState(false);
     const [metaAccounts, setMetaAccounts] = useState([]);
+    const [metaSocialAccounts, setMetaSocialAccounts] = useState([]);
+    const [aiAgentConfig, setAiAgentConfig] = useState(null);
     const [metaMappings, setMetaMappings] = useState([]);
     const [metaCampaigns, setMetaCampaigns] = useState([]);
     const [expandedCampaigns, setExpandedCampaigns] = useState(new Set());
@@ -237,11 +239,22 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         if (!targetClinicId) return;
 
         try {
-            const { data: mConfig } = await supabase.from('meta_ads_config').select('*').eq('clinic_id', targetClinicId).maybeSingle();
-            if (mConfig) setMetaConfig(mConfig);
+            const { data: mConfig } = await supabase.from('meta_ads_config').select('access_token, business_id, is_active, sync_mode').eq('clinic_id', targetClinicId).maybeSingle();
+            if (mConfig) setMetaConfig({
+                access_token: mConfig.access_token || '',
+                business_id: mConfig.business_id || '',
+                is_active: mConfig.is_active ?? true,
+                sync_mode: mConfig.sync_mode || false
+            });
 
             const { data: mAccounts } = await supabase.from('meta_ads_accounts').select('*').eq('clinic_id', targetClinicId);
             setMetaAccounts(mAccounts || []);
+
+            const { data: sAccounts } = await supabase.from('meta_social_accounts').select('*').eq('clinic_id', targetClinicId);
+            setMetaSocialAccounts(sAccounts || []);
+
+            const { data: aiConfig } = await supabase.from('ai_agent_config').select('*').eq('clinic_id', targetClinicId).maybeSingle();
+            setAiAgentConfig(aiConfig);
 
             const { data: mMappings } = await supabase.from('meta_ads_agenda_mapping').select('*').eq('clinic_id', targetClinicId);
             setMetaMappings(mMappings || []);
@@ -1670,7 +1683,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 clinic_id: clinicId,
                 access_token: tokenToSave,
                 business_id: metaConfig.business_id,
-                is_active: metaConfig.is_active
+                is_active: metaConfig.is_active,
+                sync_mode: metaConfig.sync_mode
             }, { onConflict: 'clinic_id' });
 
             if (error) throw error;
@@ -1730,7 +1744,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 clinic_id: clinicId,
                 access_token: tempMetaToken,
                 business_id: business.id,
-                is_active: true
+                is_active: true,
+                sync_mode: true
             }, { onConflict: 'clinic_id' });
             if (configError) throw configError;
 
@@ -1774,6 +1789,9 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 }, { onConflict: 'clinic_id,account_id,platform' });
                 if (pageError) console.error("Error guardando página:", pageError);
             }
+
+            // Refrescar datos locales
+            fetchMetaData();
 
             for (const ig of instagrams) {
                 const { error: igError } = await supabase.from('meta_social_accounts').upsert({
@@ -1835,6 +1853,9 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         try {
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) throw new Error("No hay sesión activa. Por favor, logueate de nuevo.");
+
+            // Informar al usuario sobre el modo de sincronización
+            console.log(`Iniciando sincronización en modo: ${metaConfig.sync_mode ? 'AUTOMÁTICO' : 'MANUAL'}`);
 
             const { data, error } = await supabase.functions.invoke('sync-meta-ads', {
                 body: {
@@ -2081,16 +2102,63 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <div className="card" style={{ padding: '25px', marginBottom: 0 }}>
                             <h4 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>🔑 Configuración Técnica</h4>
                             <form onSubmit={handleSaveMeta} className="premium-form-v">
+                                <div className="form-group" style={{ marginBottom: '20px', padding: '10px', background: 'rgba(var(--primary-rgb), 0.05)', borderRadius: '10px', border: '1px solid rgba(var(--primary-rgb), 0.2)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <label style={{ cursor: 'pointer', margin: 0 }}>
+                                            <strong>🔄 Sincronización Automática</strong>
+                                            <span style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                                                {metaConfig.sync_mode ? "Usando datos de 'Conectar con Meta'" : "Usando configuración manual"}
+                                            </span>
+                                        </label>
+                                        <div className={`switch-toggle ${metaConfig.sync_mode ? 'on' : 'off'}`}
+                                            onClick={() => setMetaConfig({ ...metaConfig, sync_mode: !metaConfig.sync_mode })}
+                                            style={{
+                                                width: '40px',
+                                                height: '20px',
+                                                background: metaConfig.sync_mode ? 'var(--primary)' : '#555',
+                                                borderRadius: '20px',
+                                                position: 'relative',
+                                                cursor: 'pointer',
+                                                transition: '0.3s'
+                                            }}>
+                                            <div style={{
+                                                width: '16px',
+                                                height: '16px',
+                                                background: 'white',
+                                                borderRadius: '50%',
+                                                position: 'absolute',
+                                                top: '2px',
+                                                left: metaConfig.sync_mode ? '22px' : '2px',
+                                                transition: '0.3s'
+                                            }} />
+                                        </div>
+                                    </div>
+                                </div>
                                 <div className="form-group">
                                     <label>Token de Acceso</label>
-                                    <input type="password" value={metaConfig.access_token} onChange={e => setMetaConfig({ ...metaConfig, access_token: e.target.value })} placeholder="EAA..." required />
+                                    <input
+                                        type="password"
+                                        value={metaConfig.access_token}
+                                        onChange={e => setMetaConfig({ ...metaConfig, access_token: e.target.value })}
+                                        placeholder="EAA..."
+                                        required
+                                        disabled={metaConfig.sync_mode}
+                                        style={{ opacity: metaConfig.sync_mode ? 0.5 : 1 }}
+                                    />
                                 </div>
                                 <div className="form-group">
                                     <label>ID de Portafolio / Negocio</label>
-                                    <input type="text" value={metaConfig.business_id} onChange={e => setMetaConfig({ ...metaConfig, business_id: e.target.value })} placeholder="1234567890..." />
+                                    <input
+                                        type="text"
+                                        value={metaConfig.business_id}
+                                        onChange={e => setMetaConfig({ ...metaConfig, business_id: e.target.value })}
+                                        placeholder="1234567890..."
+                                        disabled={metaConfig.sync_mode}
+                                        style={{ opacity: metaConfig.sync_mode ? 0.5 : 1 }}
+                                    />
                                 </div>
                                 <button type="submit" className="btn-process" disabled={savingMeta} style={{ width: '100%', marginBottom: '15px' }}>
-                                    {savingMeta ? "Guardando..." : "💾 Guardar Manual"}
+                                    {savingMeta ? "Guardando..." : "💾 Guardar Configuración"}
                                 </button>
                                 <div style={{ textAlign: 'center', position: 'relative', margin: '20px 0' }}>
                                     <hr style={{ border: 'none', borderTop: '1px solid var(--glass-border)' }} />
@@ -2104,23 +2172,98 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         </div>
 
                         <div className="card" style={{ padding: '25px', marginBottom: 0 }}>
-                            <h4 style={{ marginBottom: '20px' }}>💳 Cuentas Activas</h4>
-                            <div className="accounts-list" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                                {metaAccounts.length === 0 ? (
+                            <h4 style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>💳 Cuentas y Activos</span>
+                                {metaConfig.sync_mode && <span style={{ fontSize: '0.65rem', padding: '4px 8px', background: 'rgba(var(--primary-rgb), 0.2)', color: 'var(--primary)', borderRadius: '20px', border: '1px solid var(--primary)' }}>Sincronizado</span>}
+                            </h4>
+                            <div className="accounts-list" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                                {!metaConfig.sync_mode && metaAccounts.length === 0 ? (
                                     <div style={{ textAlign: 'center', padding: '20px' }}>
-                                        <p className="text-muted">No hay cuentas vinculadas.</p>
-                                        <button className="btn-secondary" onClick={discoverAccounts}>🔍 Descubrir</button>
+                                        <p className="text-muted">Cambia a Sincronización Automática o descubre cuentas manuales.</p>
+                                        <button className="btn-secondary" onClick={discoverAccounts}>🔍 Descubrir Cuentas</button>
                                     </div>
                                 ) : (
-                                    metaAccounts.map(acc => (
-                                        <div key={acc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid var(--glass-border)' }}>
-                                            <div>
-                                                <strong style={{ fontSize: '0.85rem' }}>{acc.name || acc.ad_account_id}</strong>
-                                                <span style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-muted)' }}>{acc.ad_account_id}</span>
-                                            </div>
-                                            <input type="checkbox" checked={acc.is_sync_enabled} onChange={() => toggleAccountSync(acc.id, acc.is_sync_enabled)} />
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                        {/* SECCIÓN 1: CUENTAS DE ANUNCIOS */}
+                                        <div>
+                                            <h5 style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>
+                                                Cuentas de Anuncios
+                                            </h5>
+                                            {metaAccounts.length === 0 ? (
+                                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '8px' }}>Ninguna cuenta detectada</p>
+                                            ) : (
+                                                metaAccounts.map(acc => (
+                                                    <div key={acc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', marginBottom: '5px', border: acc.is_sync_enabled ? '1px solid rgba(var(--primary-rgb), 0.3)' : '1px solid transparent' }}>
+                                                        <div>
+                                                            <strong style={{ fontSize: '0.8rem', display: 'block' }}>{acc.name || acc.ad_account_id}</strong>
+                                                            <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{acc.ad_account_id}</span>
+                                                        </div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <span style={{ fontSize: '0.6rem', color: acc.is_sync_enabled ? 'var(--primary)' : 'var(--text-muted)', fontWeight: acc.is_sync_enabled ? 'bold' : 'normal' }}>
+                                                                {acc.is_sync_enabled ? 'ACTIVA' : 'INACTIVA'}
+                                                            </span>
+                                                            <input type="checkbox" checked={acc.is_sync_enabled} onChange={() => toggleAccountSync(acc.id, acc.is_sync_enabled)} style={{ cursor: 'pointer' }} />
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
                                         </div>
-                                    ))
+
+                                        {/* SECCIÓN 2: PÁGINAS E INSTAGRAM (Solo en modo automático) */}
+                                        {metaConfig.sync_mode && (
+                                            <div>
+                                                <h5 style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" /></svg>
+                                                    Presencia Social
+                                                </h5>
+                                                {metaSocialAccounts.length === 0 ? (
+                                                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '8px' }}>Ninguna página detectada</p>
+                                                ) : (
+                                                    metaSocialAccounts.map(social => (
+                                                        <div key={social.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', marginBottom: '5px' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: social.is_active ? '#10b981' : '#6b7280' }}></div>
+                                                                <div>
+                                                                    <strong style={{ fontSize: '0.8rem', display: 'block' }}>{social.name}</strong>
+                                                                    <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{social.platform}</span>
+                                                                </div>
+                                                            </div>
+                                                            <span style={{ fontSize: '0.6rem', color: social.is_active ? '#10b981' : 'var(--text-muted)' }}>
+                                                                {social.is_active ? 'CONECTADO' : 'DESCONECTADO'}
+                                                            </span>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* SECCIÓN 3: WHATSAPP (Solo en modo automático) */}
+                                        {metaConfig.sync_mode && (
+                                            <div>
+                                                <h5 style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 1 1-7.6-14.1 8.38 8.38 0 0 1 3.8.9L21 3z" /></svg>
+                                                    WhatsApp Business
+                                                </h5>
+                                                {!aiAgentConfig || !aiAgentConfig.phone_id ? (
+                                                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '8px' }}>WhatsApp no configurado</p>
+                                                ) : (
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: aiAgentConfig.is_active ? '#10b981' : '#6b7280' }}></div>
+                                                            <div>
+                                                                <strong style={{ fontSize: '0.8rem', display: 'block' }}>Canal de Mensajería</strong>
+                                                                <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)' }}>ID: {aiAgentConfig.phone_id}</span>
+                                                            </div>
+                                                        </div>
+                                                        <span style={{ fontSize: '0.6rem', color: aiAgentConfig.is_active ? '#10b981' : 'var(--text-muted)' }}>
+                                                            {aiAgentConfig.is_active ? 'ACTIVO' : 'INACTIVO'}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         </div>
@@ -2201,7 +2344,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                             >
                                                 🌍 Todas las Cuentas
                                             </div>
-                                            {metaAccounts.map(acc => {
+                                            {metaAccounts.filter(a => a.is_sync_enabled).map(acc => {
                                                 const isSelected = Array.isArray(metaAccountFilter) && metaAccountFilter.includes(acc.ad_account_id);
                                                 return (
                                                     <div
