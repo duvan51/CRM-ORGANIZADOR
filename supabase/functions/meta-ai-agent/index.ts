@@ -54,6 +54,7 @@ serve(async (req) => {
         let clinicId = body.clinic_id
         let pageAccessToken = ''
 
+        let metaMessageId = '';
         if (isHumanReply) {
             text = body.text
             externalUserId = body.external_user_id
@@ -62,38 +63,55 @@ serve(async (req) => {
             text = body.text
             externalUserId = 'test-user'
         } else {
-            const entry = body.entry?.[0]
-            const entryId = entry?.id
-
             if (body.object === 'page' || body.object === 'instagram') {
-                platform = body.object === 'page' ? 'messenger' : 'instagram'
-                recipientId = entryId
+                const entry = body.entry?.[0]
                 const messaging = entry?.messaging?.[0]
-                externalUserId = messaging?.sender?.id
-                text = messaging?.message?.text
-                if (!text) return new Response('No text found in social message', { status: 200, headers: corsHeaders })
+                metaMessageId = messaging?.message?.mid || messaging?.message?.id || messaging?.id || '';
+                platform = body.object === 'page' ? 'messenger' : 'instagram'
+                recipientId = messaging?.recipient?.id || entry?.id || '';
+                externalUserId = messaging?.sender?.id || '';
+                text = messaging?.message?.text || '';
             } else {
-                // WhatsApp
+                const entry = body.entry?.[0]
                 const changes = entry?.changes?.[0]
                 const value = changes?.value
                 const message = value?.messages?.[0]
-
-                if (!message) return new Response('No message found', { status: 200, headers: corsHeaders })
-
-                externalUserId = message.from
-                text = message.text?.body
-                phoneId = value?.metadata?.phone_number_id
+                metaMessageId = message?.id || '';
+                externalUserId = message?.from || '';
+                text = message?.text?.body || message?.button?.text || '';
+                phoneId = value?.metadata?.phone_number_id || '';
                 platform = 'whatsapp'
             }
         }
+
+        console.log(`📩 Webhook recibido: Platform=${platform}, Recipient=${recipientId}, Phone=${phoneId}, MsgId=${metaMessageId}`);
+
+        // --- FUNCIÓN AUXILIAR PARA NOTIFICAR REALTIME ---
+        const notifyRealtime = async (cId, cvId) => {
+            try {
+                // Usamos el mismo nombre de canal que el frontend (con prefijo meta-clean-)
+                const channel = supabaseServer.channel(`meta-clean-${cId}`);
+                await channel.send({
+                    type: 'broadcast',
+                    event: 'CHATS_UPDATE',
+                    payload: { conversation_id: cvId }
+                });
+                console.log(`📢 Realtime Broadcast enviado a: meta-clean-${cId}`);
+            } catch (e) {
+                console.error("Error enviando broadcast:", e);
+            }
+        };
 
         if (!text) return new Response('No text to process', { status: 200, headers: corsHeaders })
 
         // Buscar Configuración de la Clínica
         let config;
+        let targetClinicId = clinicId;
+
         if ((isTest || isHumanReply) && clinicId) {
             const { data } = await supabaseServer.from('ai_agent_config').select('*').eq('clinic_id', clinicId).single()
             config = data
+            targetClinicId = clinicId;
 
             if (isHumanReply && (platform === 'messenger' || platform === 'instagram')) {
                 const { data: socialAcc } = await supabaseServer
@@ -111,39 +129,51 @@ serve(async (req) => {
                 phoneId = config.phone_id
             }
         } else if (platform === 'whatsapp' && phoneId) {
+            // Caso WhatsApp: Buscamos por phone_id
             const { data } = await supabaseServer.from('ai_agent_config').select('*').eq('phone_id', phoneId).eq('is_active', true).single()
             config = data
+            targetClinicId = config?.clinic_id;
         } else if (recipientId) {
+            // Caso Messenger/Instagram: Buscamos por el ID de la cuenta vinculado
             const { data: socialAcc } = await supabaseServer
                 .from('meta_social_accounts')
-                .select('*, ai_agent_config:clinic_id(id, api_key, model, system_prompt, meta_access_token)')
+                .select('clinic_id')
                 .eq('account_id', recipientId)
                 .single()
 
             if (socialAcc) {
-                config = socialAcc.ai_agent_config
-                pageAccessToken = socialAcc.access_token
+                targetClinicId = socialAcc.clinic_id;
+                const { data: aiConfig } = await supabaseServer.from('ai_agent_config').select('*').eq('clinic_id', targetClinicId).single()
+                config = aiConfig;
+
+                // Buscar el token de acceso específico para esta cuenta
+                const { data: specificAcc } = await supabaseServer
+                    .from('meta_social_accounts')
+                    .select('access_token')
+                    .eq('account_id', recipientId)
+                    .single()
+                pageAccessToken = specificAcc?.access_token || '';
             }
         }
 
-        if (!config) {
-            return new Response(JSON.stringify({
-                error: `Configuración de IA no encontrada. Verifica que el ID ${phoneId || recipientId} esté vinculado en el panel.`
-            }), {
-                status: 200,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            })
+        if (!targetClinicId) {
+            return new Response('Clinic not found', { status: 200, headers: corsHeaders })
         }
 
         let aiResponse = "";
         let conversationId = null;
+
+        if (!config) {
+            // Fallback: Si no hay IA activa, al menos guardamos el mensaje para el CRM
+            aiResponse = ""; // No habrá respuesta automática
+        }
 
         if (isHumanReply) {
             aiResponse = text;
             const { data: conv } = await supabaseServer
                 .from('meta_conversations')
                 .select('id')
-                .eq('clinic_id', clinicId)
+                .eq('clinic_id', targetClinicId)
                 .eq('external_user_id', externalUserId)
                 .eq('platform', platform)
                 .single();
@@ -156,16 +186,16 @@ serve(async (req) => {
                 let { data: conversation, error: convError } = await supabaseServer
                     .from('meta_conversations')
                     .select('*')
-                    .eq('clinic_id', config.id || config.clinic_id)
+                    .eq('clinic_id', targetClinicId)
                     .eq('external_user_id', externalUserId)
                     .eq('platform', platform)
-                    .single()
+                    .maybeSingle();
 
-                if (convError && convError.code === 'PGRST116') {
+                if (!conversation) {
                     const { data: newConv } = await supabaseServer
                         .from('meta_conversations')
                         .insert({
-                            clinic_id: config.id || config.clinic_id,
+                            clinic_id: targetClinicId,
                             external_user_id: externalUserId,
                             platform: platform,
                             status: 'ai_handling'
@@ -175,16 +205,30 @@ serve(async (req) => {
                     conversation = newConv
                 }
 
-                if (!conversation || conversation.status === 'paused' || conversation.status === 'human_required') {
-                    return new Response('Chat pausado', { status: 200, headers: corsHeaders })
-                }
                 conversationId = conversation.id
+                const finalMsgId = metaMessageId || `msg_${Date.now()}`;
 
-                await supabaseServer.from('meta_messages').insert({
+                // --- ARREGLO: GUARDAR MENSAJE (Con clinic_id para Realtime) ---
+                await supabaseServer.from('meta_messages').upsert({
                     conversation_id: conversationId,
+                    sender_id: externalUserId,
                     sender_type: 'user',
-                    content: text
-                })
+                    content: text,
+                    platform: platform,
+                    clinic_id: targetClinicId,
+                    external_id: finalMsgId
+                }, { onConflict: 'external_id' });
+
+                await supabaseServer.from('meta_conversations').update({
+                    last_message_at: new Date().toISOString()
+                }).eq('id', conversationId);
+
+                // Notificar cambio
+                await notifyRealtime(targetClinicId, conversationId);
+
+                if (conversation.status === 'paused' || conversation.status === 'human_required') {
+                    return new Response('Mensaje guardado (modo humano)', { status: 200, headers: corsHeaders })
+                }
 
                 const { data: histData } = await supabaseServer
                     .from('meta_messages')
@@ -512,11 +556,22 @@ serve(async (req) => {
                 })
             }
 
-            await supabaseServer.from('meta_messages').insert({
+            await supabaseServer.from('meta_messages').upsert({
                 conversation_id: conversationId,
                 sender_type: isHumanReply ? 'human' : 'ai',
-                content: part
-            })
+                content: part,
+                platform: platform,
+                clinic_id: clinicId || config.clinic_id,
+                external_id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+            }, { onConflict: 'external_id' });
+
+            // Actualizamos reporte de tiempo
+            await supabaseServer.from('meta_conversations').update({
+                last_message_at: new Date().toISOString()
+            }).eq('id', conversationId);
+
+            // Notificar cambio
+            await notifyRealtime(clinicId || config.clinic_id, conversationId);
 
             // Pequeño delay de 1 segundo entre mensajes para simular escritura natural
             if (messageParts.length > 1) {

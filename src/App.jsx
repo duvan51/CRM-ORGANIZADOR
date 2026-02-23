@@ -13,6 +13,7 @@ import SalesCounter from "./components/SalesCounter.jsx";
 import AgentDashboard from "./components/AgentDashboard.jsx";
 import useWebSocket from "./hooks/useWebSocket.js";
 import PatientTracking from "./components/PatientTracking.jsx";
+import ConversationsManager from "./components/ConversationsManager.jsx";
 import SubscriptionManager from "./components/SubscriptionManager.jsx";
 import QuickScheduleModal from "./components/QuickScheduleModal.jsx";
 import ResetPasswordForm from "./components/ResetPasswordForm.jsx";
@@ -126,8 +127,10 @@ function App() {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
-  // Implementación de WebSockets para tiempo real
-  useWebSocket((message) => {
+  // Implementación de WebSockets para tiempo real. Se devuelve el último mensaje por si
+  // algún componente lo necesita directamente (por ejemplo para depuración).
+  const { lastMessage } = useWebSocket((message) => {
+    console.log('App received realtime message:', message);
     switch (message.type) {
       case "REFRESH_CITAS":
       case "REFRESH_BLOQUEOS":
@@ -656,6 +659,10 @@ function App() {
                   <span className="tab-icon">⚙️</span> <span className="tab-text">Admin</span>
                 </div>
               )}
+
+              <div className={`nav-tab ${activeTab === "chats" ? "active" : ""}`} onClick={() => setActiveTab("chats")}>
+                <span className="tab-icon">💬</span> <span className="tab-text">Chats</span>
+              </div>
             </>
           )}
         </div>
@@ -704,6 +711,10 @@ function App() {
 
         {activeTab === "dashboard" && (
           <AgentDashboard user={user} />
+        )}
+
+        {activeTab === "chats" && user && (
+          <ConversationsManager clinicId={user.clinic_id || user.id} />
         )}
 
         {activeTab === "agenda" && (

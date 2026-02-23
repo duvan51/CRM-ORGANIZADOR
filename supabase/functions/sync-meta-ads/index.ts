@@ -12,17 +12,45 @@ serve(async (req) => {
     }
 
     try {
-        const supabaseClient = createClient(
+        const authHeader = req.headers.get('Authorization')
+        if (!authHeader) throw new Error('No authorization header')
+
+        // 1. Cliente para verificar al usuario
+        const authClient = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-            { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+            { global: { headers: { Authorization: authHeader } } }
         )
+        const { data: { user }, error: authError } = await authClient.auth.getUser()
+        if (authError || !user) {
+            console.error("Auth Error details:", authError);
+            throw new Error('Unauthorized: Tu sesión ha expirado o es inválida. Por favor, cierra sesión y vuelve a entrar al CRM.');
+        }
 
-        const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
-        if (authError || !user) throw new Error('Unauthorized')
+        // 2. Cliente con Llave Maestra para operaciones de DB (Sincronización)
+        const supabaseClient = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+            { auth: { persistSession: false } }
+        )
 
         const { data: profile } = await supabaseClient.from('profiles').select('clinic_id').eq('id', user.id).single()
         const clinicId = profile?.clinic_id || user.id
+
+        // --- FUNCIÓN AUXILIAR PARA NOTIFICAR REALTIME ---
+        const notifyRealtime = async (cId: string, cvId: string) => {
+            try {
+                const channel = supabaseClient.channel(`meta-clean-${cId}`);
+                await channel.send({
+                    type: 'broadcast',
+                    event: 'CHATS_UPDATE',
+                    payload: { conversation_id: cvId }
+                });
+                console.log(`📢 Realtime Broadcast enviado a: meta-clean-${cId}`);
+            } catch (e) {
+                console.error("Error enviando broadcast:", e);
+            }
+        };
 
         const body = await req.json().catch(() => ({}))
         const { action, startDate, endDate } = body
@@ -40,6 +68,40 @@ serve(async (req) => {
         }
 
         const accessToken = config.access_token
+
+        if (action === 'exchange-token') {
+            const shortLivedToken = body.shortLivedToken
+            if (!shortLivedToken) throw new Error('shortLivedToken is required')
+
+            const appId = Deno.env.get('FACEBOOK_APP_ID') || '850133951397257'
+            const appSecret = Deno.env.get('FACEBOOK_APP_SECRET') || 'a8ae91262d9867dfb6cb611c4e42b369'
+            // Nota: Se recomienda configurar estos como secrets en Supabase:
+            // supabase secrets set FACEBOOK_APP_ID=... FACEBOOK_APP_SECRET=...
+
+            const exchangeUrl = `https://graph.facebook.com/v18.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortLivedToken}`
+
+            const exchangeRes = await fetch(exchangeUrl)
+            const exchangeData = await exchangeRes.json()
+
+            if (exchangeData.error) throw new Error(exchangeData.error.message)
+
+            const longLivedToken = exchangeData.access_token
+
+            // Opcionalmente guardar el token de una vez
+            const { error: updateError } = await supabaseClient
+                .from('meta_ads_config')
+                .upsert({
+                    clinic_id: clinicId,
+                    access_token: longLivedToken,
+                    is_active: true
+                }, { onConflict: 'clinic_id' })
+
+            if (updateError) throw updateError
+
+            return new Response(JSON.stringify({ success: true, access_token: longLivedToken }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            })
+        }
 
         if (action === 'discover-accounts') {
             const metaResponse = await fetch(`https://graph.facebook.com/v18.0/me/adaccounts?fields=name,account_id&access_token=${accessToken}`)
@@ -187,8 +249,143 @@ serve(async (req) => {
             })
         }
 
+        if (action === 'sync-conversations') {
+            const { data: socialAccounts } = await supabaseClient
+                .from('meta_social_accounts')
+                .select('*')
+                .eq('clinic_id', clinicId)
+                .eq('is_active', true);
+
+            if (!socialAccounts || socialAccounts.length === 0) {
+                throw new Error('No hay páginas de Messenger/IG conectadas.');
+            }
+
+            let totalNewMessages = 0;
+            const diagnostics: any[] = [];
+
+            for (const acc of socialAccounts) {
+                try {
+                    const pageToken = acc.access_token || accessToken;
+                    const platform = acc.platform;
+
+                    console.log(`Syncing ${platform} for account ${acc.account_id}`);
+
+                    const convRes = await fetch(`https://graph.facebook.com/v18.0/${acc.account_id}/conversations?fields=id,participants,updated_time&access_token=${pageToken}`);
+                    const convData = await convRes.json();
+
+                    if (convData.error) {
+                        diagnostics.push({ account: acc.name, error: convData.error.message });
+                        continue;
+                    }
+
+                    const rawConvs = convData.data || [];
+                    let accConvs = 0;
+
+                    for (const conv of rawConvs) {
+                        const participant = conv.participants?.data?.find((p: any) => p.id !== acc.account_id);
+                        const externalUserId = participant?.id || 'unknown';
+                        const externalUserName = participant?.name || 'Usuario Meta';
+
+                        const { data: dbConv, error: convErr } = await supabaseClient
+                            .from('meta_conversations')
+                            .upsert({
+                                clinic_id: clinicId,
+                                external_user_id: externalUserId,
+                                // Hacemos el nombre opcional por si la columna no existe aún
+                                ...(externalUserName ? { external_user_name: externalUserName } : {}),
+                                platform: platform,
+                                last_message_at: conv.updated_time
+                            }, { onConflict: 'clinic_id,external_user_id,platform' })
+                            .select()
+                            .single();
+
+                        if (convErr) {
+                            diagnostics.push({
+                                account: acc.name,
+                                conv_id: conv.id,
+                                db_error: convErr.message,
+                                db_details: convErr.details,
+                                clinic_id_used: clinicId
+                            });
+                            continue;
+                        }
+
+                        if (!dbConv) continue;
+
+                        const msgRes = await fetch(`https://graph.facebook.com/v18.0/${conv.id}/messages?fields=id,message,created_time,from,to&limit=20&access_token=${pageToken}`);
+                        const msgData = await msgRes.json();
+
+                        if (msgData.error) {
+                            diagnostics.push({
+                                account: acc.name || acc.account_id,
+                                msg_fetch_error: msgData.error.message
+                            });
+                            continue;
+                        }
+
+                        if (msgData.data && msgData.data.length > 0) {
+                            const messagesToInsert = msgData.data
+                                .filter((m: any) => m.message)
+                                .map((m: any) => ({
+                                    id: m.id,
+                                    conversation_id: dbConv.id,
+                                    sender_id: m.from.id,
+                                    sender_type: m.from.id === acc.account_id ? 'human' : 'user',
+                                    content: m.message,
+                                    platform: platform,
+                                    created_at: m.created_time
+                                }));
+
+                            for (const msg of messagesToInsert) {
+                                const { error: msgErr } = await supabaseClient
+                                    .from('meta_messages')
+                                    .upsert({
+                                        conversation_id: msg.conversation_id,
+                                        sender_id: msg.sender_id,
+                                        sender_type: msg.sender_type,
+                                        content: msg.content,
+                                        platform: msg.platform,
+                                        created_at: msg.created_at,
+                                        clinic_id: clinicId,
+                                        external_id: msg.id
+                                    }, { onConflict: 'external_id' });
+
+                                if (!msgErr) {
+                                    totalNewMessages++;
+                                } else {
+                                    console.error("Error guardando mensaje:", msgErr.message);
+                                    diagnostics.push({
+                                        account: acc.name || acc.account_id,
+                                        msg_error: msgErr.message
+                                    });
+                                }
+                            }
+                            // Notificar tras procesar los mensajes de una conversación
+                            await notifyRealtime(clinicId, dbConv.id);
+                            accConvs++;
+                        }
+                    }
+                    diagnostics.push({
+                        account: acc.name || acc.account_id,
+                        platform,
+                        conversations_found: rawConvs.length,
+                        messages_synced: accConvs
+                    });
+                } catch (e: any) {
+                    diagnostics.push({
+                        account: acc.name || acc.account_id,
+                        error: e.message
+                    });
+                }
+            }
+
+            return new Response(JSON.stringify({ success: true, count: totalNewMessages, diagnostics }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+        }
+
         return new Response(JSON.stringify({ error: 'Invalid action' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-    } catch (error) {
+    } catch (error: any) {
         return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 })

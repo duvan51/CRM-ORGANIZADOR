@@ -1651,12 +1651,28 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         e.preventDefault();
         setSavingMeta(true);
         try {
+            let tokenToSave = metaConfig.access_token;
+
+            // Intentar intercambiar por uno de larga duración si es posible
+            try {
+                const { data: exchangeData } = await supabase.functions.invoke('sync-meta-ads', {
+                    body: { action: 'exchange-token', shortLivedToken: tokenToSave }
+                });
+                if (exchangeData?.access_token) {
+                    tokenToSave = exchangeData.access_token;
+                    setMetaConfig(prev => ({ ...prev, access_token: tokenToSave }));
+                }
+            } catch (e) {
+                console.log("No se pudo intercambiar el token (posiblemente ya es de larga duración o es de sistema).");
+            }
+
             const { error } = await supabase.from('meta_ads_config').upsert({
                 clinic_id: clinicId,
-                access_token: metaConfig.access_token,
+                access_token: tokenToSave,
                 business_id: metaConfig.business_id,
                 is_active: metaConfig.is_active
             }, { onConflict: 'clinic_id' });
+
             if (error) throw error;
             alert("Configuración de Portafolio guardada.");
         } catch (err) {
@@ -1678,10 +1694,31 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 'pages_messaging',
                 'pages_read_engagement'
             ]);
-            setTempMetaToken(authResponse.accessToken);
+
+            // --- NUEVO: Intercambiar por Token de Larga Duración (60 días) ---
+            setSavingMeta(true);
+            const { data: exchangeData, error: exchangeError } = await supabase.functions.invoke('sync-meta-ads', {
+                body: {
+                    action: 'exchange-token',
+                    shortLivedToken: authResponse.accessToken
+                }
+            });
+
+            if (exchangeError || !exchangeData?.access_token) {
+                console.error("Error al intercambiar token:", exchangeError);
+                // Si falla el intercambio, usamos el corto para no bloquear al usuario, 
+                // pero lo ideal es que funcione.
+                setTempMetaToken(authResponse.accessToken);
+            } else {
+                console.log("Token de larga duración obtenido con éxito.");
+                setTempMetaToken(exchangeData.access_token);
+            }
+
             setShowMetaConnectModal(true);
         } catch (err) {
             alert(err.message);
+        } finally {
+            setSavingMeta(false);
         }
     };
 
@@ -1829,7 +1866,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             // Forzamos recarga profunda de metadatos
             await fetchMetaData();
         } catch (err) {
-            alert("Error en sincronización: " + err.message);
+            const isTokenError = err.message?.toLowerCase().includes("token") || err.message?.toLowerCase().includes("expired");
+            if (isTokenError) {
+                alert("❌ Tu sesión de Meta ha caducado o el token es inválido.\n\nPor favor, usa el botón 'Conectar con Meta' para renovar el acceso.");
+            } else {
+                alert("Error en sincronización: " + err.message);
+            }
         } finally {
             setSavingMeta(false);
         }
@@ -2701,7 +2743,6 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 <>
                                     <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 <span className="sidebar-text">SMS Automatizados</span></button>
                                     <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 <span className="sidebar-text">Email Automatizados</span></button>
-                                    <button className={activeView === "chats" ? "active" : ""} onClick={() => setActiveView("chats")}>💬 <span className="sidebar-text">Conversaciones</span></button>
                                     <button className={activeView === "ai_agent" ? "active" : ""} onClick={() => setActiveView("ai_agent")}>🤖 <span className="sidebar-text">Agente IA</span></button>
                                     <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
                                 </>
@@ -2724,7 +2765,6 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "horarios" && renderConfigHorarios()}
                     {activeView === "sms" && renderSMS()}
                     {activeView === "email" && renderEmail()}
-                    {activeView === "chats" && <ConversationsManager clinicId={clinicId} />}
                     {activeView === "ai_agent" && <AiAgentSection clinicId={clinicId} />}
                     {activeView === "meta" && renderMetaConfig()}
                     {activeView === "logs" && renderLogs()}

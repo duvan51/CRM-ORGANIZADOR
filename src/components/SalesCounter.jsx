@@ -99,6 +99,7 @@ const SalesCounter = ({ user }) => {
 
     useEffect(() => {
         if (lastMessage && (lastMessage.type === "REFRESH_CITAS")) {
+            console.log('SalesCounter detected refresh message', lastMessage);
             fetchStats();
         }
     }, [lastMessage]);
