@@ -27,6 +27,14 @@ serve(async (req) => {
             const token = url.searchParams.get('hub.verify_token')
             const challenge = url.searchParams.get('hub.challenge')
 
+            console.log(`🔍 Intentando verificar Webhook: mode=${mode}, token=${token}`);
+
+            // Aceptamos tu token directamente como respaldo de emergencia
+            if (mode === 'subscribe' && token === 'duvan1234789149') {
+                console.log("✅ Verificación exitosa (Token directo)");
+                return new Response(challenge, { status: 200, headers: corsHeaders })
+            }
+
             if (mode && token) {
                 const { data: config } = await supabaseServer
                     .from('ai_agent_config')
@@ -38,11 +46,14 @@ serve(async (req) => {
                     return new Response(challenge, { status: 200, headers: corsHeaders })
                 }
             }
-            return new Response('Verification failed', { status: 403, headers: corsHeaders })
+            return new Response(`Verification failed. Mode: ${mode}, Token: ${token}`, { status: 403, headers: corsHeaders })
         }
 
         // 3. Procesamiento de Mensajes (POST)
         const body = await req.json()
+        console.log("📦 NEW WEBHOOK EVENT RECEIVED!");
+        console.log("📦 FULL BODY:", JSON.stringify(body, null, 2));
+
         const isTest = body.is_test === true
         const isHumanReply = body.is_human_reply === true
 
@@ -87,16 +98,19 @@ serve(async (req) => {
         console.log(`📩 Webhook recibido: Platform=${platform}, Recipient=${recipientId}, Phone=${phoneId}, MsgId=${metaMessageId}`);
 
         // --- FUNCIÓN AUXILIAR PARA NOTIFICAR REALTIME ---
-        const notifyRealtime = async (cId, cvId) => {
+        const notifyRealtime = async (cId: string, cvId: string) => {
             try {
-                // Usamos el mismo nombre de canal que el frontend (con prefijo meta-clean-)
+                if (!cId) {
+                    console.error("⚠️ No se puede notificar Realtime: cId es nulo");
+                    return;
+                }
                 const channel = supabaseServer.channel(`meta-clean-${cId}`);
                 await channel.send({
                     type: 'broadcast',
                     event: 'CHATS_UPDATE',
-                    payload: { conversation_id: cvId }
+                    payload: { conversation_id: cvId, timestamp: new Date().toISOString() }
                 });
-                console.log(`📢 Realtime Broadcast enviado a: meta-clean-${cId}`);
+                console.log(`📢 Realtime Broadcast enviado a: meta-clean-${cId} (Conv: ${cvId})`);
             } catch (e) {
                 console.error("Error enviando broadcast:", e);
             }
@@ -209,7 +223,13 @@ serve(async (req) => {
                 const finalMsgId = metaMessageId || `msg_${Date.now()}`;
 
                 // --- ARREGLO: GUARDAR MENSAJE (Con clinic_id para Realtime) ---
-                await supabaseServer.from('meta_messages').upsert({
+                if (!targetClinicId && conversation.clinic_id) {
+                    targetClinicId = conversation.clinic_id;
+                }
+
+                console.log(`💾 Guardando mensaje en DB: Platform=${platform}, Clinic=${targetClinicId}, Conv=${conversationId}`);
+
+                const { error: msgInsertError } = await supabaseServer.from('meta_messages').upsert({
                     conversation_id: conversationId,
                     sender_id: externalUserId,
                     sender_type: 'user',
@@ -219,6 +239,10 @@ serve(async (req) => {
                     external_id: finalMsgId
                 }, { onConflict: 'external_id' });
 
+                if (msgInsertError) {
+                    console.error("❌ Error guardando mensaje:", msgInsertError.message);
+                }
+
                 await supabaseServer.from('meta_conversations').update({
                     last_message_at: new Date().toISOString()
                 }).eq('id', conversationId);
@@ -227,6 +251,7 @@ serve(async (req) => {
                 await notifyRealtime(targetClinicId, conversationId);
 
                 if (conversation.status === 'paused' || conversation.status === 'human_required') {
+                    console.log("ℹ️ Conversación en modo humano o pausada. No respondemos con IA.");
                     return new Response('Mensaje guardado (modo humano)', { status: 200, headers: corsHeaders })
                 }
 

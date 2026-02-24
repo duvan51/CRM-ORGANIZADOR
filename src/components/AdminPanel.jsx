@@ -1769,25 +1769,42 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         clinic_id: clinicId,
                         phone_id: phoneIdToSave,
                         meta_access_token: tempMetaToken,
+                        verify_token: 'duvan1234789149', // El token que me proporcionaste
                         is_active: true,
-                        provider: 'openai', // Default
+                        provider: 'openai',
                         model: 'gpt-4o-mini'
                     }, { onConflict: 'clinic_id' });
                     if (aiError) console.error("Error guardando config IA:", aiError);
                 }
             }
 
-            // 4. Guardar Páginas e Instagrams
+            // 4. Guardar Páginas e Instagrams y SUSCRIBIRLAS al Webhook
             for (const page of pages) {
-                const { error: pageError } = await supabase.from('meta_social_accounts').upsert({
-                    clinic_id: clinicId,
-                    account_id: page.id,
-                    name: page.name,
-                    platform: 'messenger',
-                    access_token: page.access_token,
-                    is_active: true
-                }, { onConflict: 'clinic_id,account_id,platform' });
-                if (pageError) console.error("Error guardando página:", pageError);
+                try {
+                    console.log(`🔔 Suscribiendo página ${page.name} (${page.id}) a Webhooks...`);
+                    // Esta es la llamada clave que le dice a Meta que envíe los mensajes
+                    const subResp = await fetch(`https://graph.facebook.com/v18.0/${page.id}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,messaging_optins&access_token=${page.access_token}`, {
+                        method: 'POST'
+                    });
+                    const subData = await subResp.json();
+                    if (subData.success) {
+                        console.log(`✅ Página ${page.name} suscrita con éxito.`);
+                    } else {
+                        console.error(`❌ Error al suscribir página ${page.name}:`, subData.error);
+                    }
+
+                    const { error: pageError } = await supabase.from('meta_social_accounts').upsert({
+                        clinic_id: clinicId,
+                        account_id: page.id,
+                        name: page.name,
+                        platform: 'messenger',
+                        access_token: page.access_token,
+                        is_active: true
+                    }, { onConflict: 'clinic_id,account_id,platform' });
+                    if (pageError) throw pageError;
+                } catch (e) {
+                    console.error("Error en proceso de suscripción de página:", e);
+                }
             }
 
             // Refrescar datos locales

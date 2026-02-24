@@ -36,11 +36,8 @@ const ConversationsManager = ({ clinicId }) => {
             }, 500);
         };
 
-        console.log("📡 DEBUG: clinicId en frontend:", clinicId);
-        if (!clinicId) {
-            console.error("❌ ERROR: No hay clinicId definido. Realtime no funcionará.");
-            return;
-        }
+        console.log("📡 Conectando Chat en Vivo. Clínica ID:", clinicId);
+        if (!clinicId) return;
 
         const channel = supabase
             .channel(`meta-clean-${clinicId}`)
@@ -50,7 +47,7 @@ const ConversationsManager = ({ clinicId }) => {
                 table: 'meta_messages',
                 filter: `clinic_id=eq.${clinicId}`
             }, (payload) => {
-                console.log("🔥 Cambio en Mensajes (Postgres):", payload);
+                console.log("🔥 Nuevo mensaje recibido en DB:", payload.new?.content);
                 debouncedRefresh();
             })
             .on('postgres_changes', {
@@ -59,19 +56,22 @@ const ConversationsManager = ({ clinicId }) => {
                 table: 'meta_conversations',
                 filter: `clinic_id=eq.${clinicId}`
             }, (payload) => {
-                console.log("🔥 Cambio en Chats/Conversaciones (Postgres):", payload);
-                debouncedRefresh();
+                console.log("🔥 Cambio en lista de chats:", payload.eventType);
+                fetchConversations();
             })
             .on('broadcast', { event: 'CHATS_UPDATE' }, (payload) => {
-                console.log("📢 Cambio detectado vía Broadcast:", payload);
+                console.log("📢 Notificación directa recibida:", payload);
                 debouncedRefresh();
             })
-            .subscribe((status, err) => {
-                console.log("🛰️ Realtime Status para", clinicId, ":", status);
+            .subscribe((status) => {
                 setRealtimeStatus(status);
-                if (err) console.error("❌ Error de suscripción Realtime:", err);
+                if (status === 'SUBSCRIBED') console.log("✅ Escuchando mensajes de Messenger/Instagram...");
             });
 
+        return () => {
+            if (refreshTimer) clearTimeout(refreshTimer);
+            supabase.removeChannel(channel);
+        };
         return () => {
             if (refreshTimer) clearTimeout(refreshTimer);
             console.log("🔌 Desconectando canal de Realtime...");
