@@ -109,14 +109,10 @@ const MasterPanel = ({ user }) => {
         setIsUpdatingPassword(true);
         try {
             // Invocamos una Edge Function personalizada para cambiar la contraseña usando el Admin SDK
-            const { data: { session } } = await supabase.auth.getSession();
-            const { data, error } = await supabase.functions.invoke('admin-update-user', {
+            const { data, error } = await supabase.functions.invoke('manage-users', {
                 body: {
                     userId: editingSuperAdmin.id,
                     password: newPassword
-                },
-                headers: {
-                    Authorization: `Bearer ${session?.access_token}`
                 }
             });
 
@@ -126,7 +122,7 @@ const MasterPanel = ({ user }) => {
             setNewPassword("");
         } catch (error) {
             console.error("Error updating password:", error);
-            showNotify("Error: Revisa que la Edge Function 'admin-update-user' esté activa", "error");
+            showNotify("Error: Revisa que la Edge Function 'manage-users' esté activa", "error");
         } finally {
             setIsUpdatingPassword(false);
         }
@@ -159,20 +155,17 @@ const MasterPanel = ({ user }) => {
             if (updateError) {
                 console.warn("Error con updateUser (403/Forbidden?), intentando vía Edge Function...");
 
-                // 3. Fallback: Usar la Edge Function pasando el token manualmente para evitar 401
-                const { data: funcData, error: funcError } = await supabase.functions.invoke('admin-update-user', {
+                // 3. Fallback: Usar la Edge Function para evitar 403 (en caso de que el trigger o RLS bloqueen updateUser)
+                const { data: funcData, error: funcError } = await supabase.functions.invoke('manage-users', {
                     body: {
                         userId: user.id, // ID del superadmin actual
                         password: myPasswordData.newPassword
-                    },
-                    headers: {
-                        Authorization: `Bearer ${session.access_token}`
                     }
                 });
 
                 if (funcError) {
                     console.error("Error en Edge Function Fallback:", funcError);
-                    throw new Error("No se pudo actualizar la contraseña. Contacta a soporte.");
+                    throw new Error("No se pudo actualizar la contraseña vía Edge Function.");
                 }
             }
 
