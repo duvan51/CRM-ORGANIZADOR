@@ -75,10 +75,24 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [testEmailRecipient, setTestEmailRecipient] = useState("");
     const [sendingTestEmail, setSendingTestEmail] = useState(false);
 
+    // Whaticket Automation States
+    const [whaticketConfig, setWhaticketConfig] = useState({
+        api_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzY29wZSI6WyJjcmVhdGU6bWVzc2FnZXMiLCJjcmVhdGU6bWVkaWFzIiwicmVhZDp3aGF0c2FwcHMiLCJ1cGRhdGU6d2hhdHNhcHBzIiwiY3JlYXRlOmNvbnRhY3RzIl0sImNvbXBhbnlJZCI6IjdlNjU4MGFhLWZjYmQtNDE3YS04MGY1LTVjOTdmZjE1M2U1ZSIsImlhdCI6MTc3MjEyMjA1Nn0.Ke7q5AAFWwgItuQ_MfstdootvsgJVaTFDbytfp3KwIU=",
+        base_url: "",
+        is_active: true
+    });
+    const [whaticketTemplates, setWhaticketTemplates] = useState([
+        { event_type: 'booking_confirmation', content: "¡Hola {paciente}! 🙋‍♂️ Tu cita en nuestra clínica ha sido agendada con éxito para el {fecha} a las {hora}. ¡Te esperamos!", is_active: true },
+        { event_type: 'reminder_24h', content: "Recordatorio: {paciente}, tienes una cita mañana {fecha} a las {hora}. ⏰ Por favor confirma respondiendo este mensaje. ¡Gracias!", is_active: true },
+        { event_type: 'immediate_attention', content: "🚨 Aviso: {paciente}, tu cita está próxima. Por favor llega 15 minutos antes. ¡Nos vemos!", is_active: false }
+    ]);
+    const [savingWhaticket, setSavingWhaticket] = useState(false);
+
     // States for Modals
     const [showAgentModal, setShowAgentModal] = useState(null); // stores agenda object
     const [showEditAgenda, setShowEditAgenda] = useState(null);
     const [showUserModal, setShowUserModal] = useState(false);
+    const [showUserPassword, setShowUserPassword] = useState(false);
     const [showServiceModal, setShowServiceModal] = useState(null); // stores service object for editing
     const [editingAgenda, setEditingAgenda] = useState({ name: "", description: "", slots_per_hour: 1, ciudad: "" });
     const [editingService, setEditingService] = useState({
@@ -107,6 +121,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [newBlock, setNewBlock] = useState({ agenda_id: "", fecha_inicio: "", fecha_fin: "", hora_inicio: "", hora_fin: "", es_todo_el_dia: 0, motivo: "", service_id: "", tipo: 1 });
     const [newAlert, setNewAlert] = useState({ agenda_id: "", mensaje: "", tipo: "info" });
     const [editingUser, setEditingUser] = useState(null);
+
+    // Whaticket Detailed States
+    const [whaticketConnections, setWhaticketConnections] = useState([]);
+    const [loadingWhaConns, setLoadingWhaConns] = useState(false);
+    const [newWhaContact, setNewWhaContact] = useState({ name: "", number: "" });
+    const [addingContact, setAddingContact] = useState(false);
 
     // Logs State
     const [globalSmsLogs, setGlobalSmsLogs] = useState([]);
@@ -227,7 +247,25 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 });
             }
 
+            // --- CARGAR CONFIG WHATICKET ---
+            const { data: wConfig } = await supabase.from('whaticket_configs').select('*').eq('clinic_id', currentClinicId).maybeSingle();
+            if (wConfig) setWhaticketConfig(wConfig);
+
+            const { data: wTemplates } = await supabase.from('whaticket_templates').select('*').eq('clinic_id', currentClinicId);
+            if (wTemplates && wTemplates.length > 0) {
+                setWhaticketTemplates(prev => {
+                    const newTempl = [...prev];
+                    wTemplates.forEach(t => {
+                        const idx = newTempl.findIndex(nt => nt.event_type === t.event_type);
+                        if (idx !== -1) newTempl[idx] = t;
+                        else newTempl.push(t);
+                    });
+                    return newTempl;
+                });
+            }
+
             await fetchMetaData(currentClinicId);
+            if (currentClinicId) fetchWhaticketConnections(currentClinicId);
         } catch (error) {
             console.error("Error fetching data:", error);
         }
@@ -550,6 +588,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     id: authData.user.id,
                     username: newUser.username,
                     full_name: newUser.full_name,
+                    email: newUser.email,
                     role: newUser.role,
                     clinic_id: currentProfile?.clinic_id // Inherit Clinic ID
                 });
@@ -577,6 +616,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             alert(`Usuario creado correctamente${userRole === "admin" ? " y vinculado a tus agendas" : ""}. Se ha enviado un correo de confirmación.`);
             setShowUserModal(false);
             setNewUser({ full_name: "", username: "", email: "", password: "", role: "agent" });
+            setShowUserPassword(false);
             fetchData();
         } catch (error) {
             console.error("Error al crear usuario:", error);
@@ -588,14 +628,16 @@ const AdminPanel = ({ token, onBack, userRole }) => {
 
     const handleEditUser = (user) => {
         setEditingUser(user);
+        const userEmail = user.email || (user.username?.includes('@') ? user.username : "");
         setNewUser({
             full_name: user.full_name || "",
             username: user.username || "",
-            email: user.email || "", // Recordar que profiles podría no tener email si no se guardó ahí
+            email: userEmail,
             password: "", // No mostramos password por seguridad
             role: user.role || "agent"
         });
         setShowUserModal(true);
+        setShowUserPassword(false);
     };
 
     const handleUpdateUser = async (e) => {
@@ -626,6 +668,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             setShowUserModal(false);
             setEditingUser(null);
             setNewUser({ full_name: "", username: "", email: "", password: "", role: "agent" });
+            setShowUserPassword(false);
             fetchData();
         } catch (error) {
             console.error("Error al actualizar usuario:", error);
@@ -786,6 +829,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             <tr>
                                 <th>Nombre</th>
                                 <th>Usuario</th>
+                                <th>Email</th>
                                 <th>Rol</th>
                                 <th>Agendas</th>
                                 {(userRole === "superuser" || userRole === "owner") && <th>Acciones</th>}
@@ -796,6 +840,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 <tr key={u.id}>
                                     <td><strong>{u.full_name}</strong></td>
                                     <td>@{u.username}</td>
+                                    <td>{u.email || (u.username?.includes('@') ? u.username : <span className="text-muted" style={{ fontSize: '0.7rem' }}>No asignado</span>)}</td>
                                     <td>
                                         <span className={`role-badge ${u.role}`}>
                                             {u.role === 'superuser' ? 'SuperAdmin' : u.role === 'admin' ? 'Administrador' : 'Agente'}
@@ -1106,7 +1151,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         type="number"
                                         defaultValue={off.precio_final}
                                         readOnly={!(userRole === "superuser" || userRole === "admin" || userRole === "owner")}
-                                        style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'white', textAlign: 'right', cursor: (!(userRole === "superuser" || userRole === "admin" || userRole === "owner")) ? 'default' : 'text' }}
+                                        style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--glass-border)', background: 'var(--btn-secondary-bg)', color: 'var(--text-main)', textAlign: 'right', cursor: (!(userRole === "superuser" || userRole === "admin" || userRole === "owner")) ? 'default' : 'text' }}
                                         onBlur={async (e) => {
                                             if (!(userRole === "superuser" || userRole === "admin" || userRole === "owner")) return;
                                             const val = parseFloat(e.target.value);
@@ -1489,6 +1534,255 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             </div>
                         ))}
                     </div>
+                </div>
+            </div>
+        </div>
+    );
+
+    const handleSaveWhaticket = async (e) => {
+        e.preventDefault();
+        setSavingWhaticket(true);
+        try {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) return;
+
+            const configToSave = {
+                clinic_id: authUser.id,
+                api_key: whaticketConfig.api_key,
+                base_url: whaticketConfig.base_url,
+                whatsapp_id: whaticketConfig.whatsapp_id,
+                is_active: whaticketConfig.is_active
+            };
+            const { error: cfgError } = await supabase.from('whaticket_configs').upsert(configToSave, { onConflict: 'clinic_id' });
+            if (cfgError) throw cfgError;
+
+            for (const t of whaticketTemplates) {
+                const { error: tError } = await supabase.from('whaticket_templates').upsert({
+                    clinic_id: authUser.id,
+                    event_type: t.event_type,
+                    content: t.content,
+                    is_active: t.is_active
+                }, { onConflict: 'clinic_id,event_type' });
+                if (tError) throw tError;
+            }
+            alert("✅ Configuración de Whaticket guardada correctamente.");
+        } catch (error) {
+            console.error(error);
+            alert("❌ Error al guardar Whaticket: " + error.message);
+        } finally {
+            setSavingWhaticket(false);
+        }
+    };
+
+    const fetchWhaticketConnections = async (cid = null) => {
+        const targetId = cid || clinicId;
+        if (!whaticketConfig.api_key || !whaticketConfig.base_url) return;
+        setLoadingWhaConns(true);
+        try {
+            // Limpiar base_url: si termina en /api/v1/ o similares, lo manejaremos en el proxy
+            let baseUrl = whaticketConfig.base_url;
+            let path = '/whatsapps';
+
+            // Si la base_url no tiene /api/v1, lo agregamos como prefijo al path
+            if (!baseUrl.includes('/api/v1')) {
+                path = '/api/v1' + path;
+            }
+
+            const { data, error } = await supabase.functions.invoke('whaticket-proxy', {
+                body: {
+                    base_url: baseUrl,
+                    api_key: whaticketConfig.api_key,
+                    method: 'GET',
+                    path: path
+                }
+            });
+
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
+            setWhaticketConnections(Array.isArray(data) ? data : []);
+        } catch (err) {
+            console.error("Error fetching Whaticket conns:", err);
+            if (err.message.includes("401")) alert("❌ Error 401: Token de Whaticket inválido o expirado.");
+            else alert("❌ " + err.message);
+        } finally {
+            setLoadingWhaConns(false);
+        }
+    };
+
+    const restartWhaticketSession = async (id) => {
+        if (!confirm("¿Deseas reiniciar esta sesión de WhatsApp?")) return;
+        try {
+            let baseUrl = whaticketConfig.base_url;
+            let path = `/whatsapps/start/${id}`;
+            if (!baseUrl.includes('/api/v1')) path = '/api/v1' + path;
+
+            const { data, error } = await supabase.functions.invoke('whaticket-proxy', {
+                body: {
+                    base_url: baseUrl,
+                    api_key: whaticketConfig.api_key,
+                    method: 'PATCH',
+                    path: path
+                }
+            });
+
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
+            alert("✅ Solicitud de reinicio enviada.");
+        } catch (err) {
+            alert("❌ Fallo al reiniciar: " + err.message);
+        }
+    };
+
+    const handleCreateWhaContact = async () => {
+        if (!newWhaContact.name || !newWhaContact.number) return alert("Completa nombre y número");
+        setAddingContact(true);
+        try {
+            let baseUrl = whaticketConfig.base_url;
+            let path = '/contacts';
+            if (!baseUrl.includes('/api/v1')) path = '/api/v1' + path;
+
+            const { data, error } = await supabase.functions.invoke('whaticket-proxy', {
+                body: {
+                    base_url: baseUrl,
+                    api_key: whaticketConfig.api_key,
+                    method: 'POST',
+                    path: path,
+                    body: { name: newWhaContact.name, number: newWhaContact.number }
+                }
+            });
+
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
+            alert("✅ Contacto creado con éxito.");
+            setNewWhaContact({ name: "", number: "" });
+        } catch (err) {
+            alert("❌ Error: " + err.message);
+        } finally {
+            setAddingContact(false);
+        }
+    };
+
+    const renderWhaticket = () => (
+        <div className="admin-section fade-in">
+            <div className="section-header">
+                <h3>💬 Automatización WhatsApp (Whaticket)</h3>
+                <p className="text-muted">Conecta tu cuenta de Whaticket para enviar notificaciones masivas y automáticas por WhatsApp.</p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginTop: '20px' }}>
+                <div className="card" style={{ padding: '25px' }}>
+                    <h4 style={{ marginBottom: '20px' }}>🔗 Vinculación de API</h4>
+                    <form onSubmit={handleSaveWhaticket} className="premium-form-v">
+                        <div className="form-group">
+                            <label>Whaticket API Key (JWT)</label>
+                            <input type="password" value={whaticketConfig.api_key} onChange={e => setWhaticketConfig({ ...whaticketConfig, api_key: e.target.value })} placeholder="Pega el token JWT aquí" required />
+                        </div>
+                        <div className="form-group">
+                            <label>Base URL de tu Whaticket</label>
+                            <input type="text" value={whaticketConfig.base_url} onChange={e => setWhaticketConfig({ ...whaticketConfig, base_url: e.target.value })} placeholder="ej: https://tudominio.whaticket.com" required />
+                        </div>
+                        <div className="form-group" style={{ flexDirection: 'row', gap: '10px', alignItems: 'center' }}>
+                            <input type="checkbox" checked={whaticketConfig.is_active} onChange={e => setWhaticketConfig({ ...whaticketConfig, is_active: e.target.checked })} id="wha_active" />
+                            <label htmlFor="wha_active" style={{ cursor: 'pointer' }}>Servicio Activo</label>
+                        </div>
+                        <button type="submit" className="btn-process" disabled={savingWhaticket}>
+                            {savingWhaticket ? "Guardando..." : "💾 Guardar y Vincular"}
+                        </button>
+                    </form>
+
+                    <div style={{ marginTop: '30px', padding: '15px', background: 'rgba(var(--primary-rgb), 0.05)', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                        <h5 style={{ margin: '0 0 10px 0', color: 'var(--primary)' }}>💡 ¿Cómo obtener mi API Key?</h5>
+                        <ol style={{ fontSize: '0.8rem', paddingLeft: '20px', margin: 0, opacity: 0.8 }}>
+                            <li>Entra a tu panel de Whaticket.</li>
+                            <li>Ve a <strong>Configuraciones</strong> &gt; <strong>API</strong>.</li>
+                            <li>Crea un nuevo Token (ej. "AndoCRM").</li>
+                            <li>Copia el Token generado y pégalo arriba.</li>
+                        </ol>
+                    </div>
+
+                    {whaticketConfig.api_key && whaticketConfig.base_url && (
+                        <div style={{ marginTop: '20px' }}>
+                            <button className="btn-secondary" onClick={() => fetchWhaticketConnections()} disabled={loadingWhaConns} style={{ width: '100%' }}>
+                                {loadingWhaConns ? "Cargando..." : "🔄 Refrescar Conexiones WA"}
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                <div className="card" style={{ padding: '25px' }}>
+                    <h4 style={{ marginBottom: '20px' }}>📱 Conexiones de WhatsApp</h4>
+                    {whaticketConnections.length === 0 ? (
+                        <p className="text-muted" style={{ fontSize: '0.85rem' }}>No se han detectado conexiones. Asegúrate de que tu base URL y Token sean correctos.</p>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {whaticketConnections.map(conn => (
+                                <div key={conn.id} style={{ padding: '15px', borderRadius: '12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <strong>{conn.name}</strong>
+                                            <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px', background: conn.status === 'CONNECTED' ? '#4ade8022' : '#f8717122', color: conn.status === 'CONNECTED' ? '#4ade80' : '#f87171' }}>
+                                                {conn.status}
+                                            </span>
+                                        </div>
+                                        <small className="text-muted">ID: {conn.id} • {conn.number || 'Sin número'}</small>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '5px' }}>
+                                        <button
+                                            className={`btn-sync-small ${whaticketConfig.whatsapp_id === conn.id ? 'active' : ''}`}
+                                            onClick={() => setWhaticketConfig({ ...whaticketConfig, whatsapp_id: conn.id })}
+                                            style={{ fontSize: '0.7rem' }}
+                                        >
+                                            {whaticketConfig.whatsapp_id === conn.id ? '✅ Usar para Bot' : 'Usar para Bot'}
+                                        </button>
+                                        <button className="btn-edit-v2" style={{ padding: '4px 8px' }} onClick={() => restartWhaticketSession(conn.id)}>🔄 Reiniciar</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <h4 style={{ margin: '30px 0 15px 0' }}>👤 Acción Rápida: Crear Contacto</h4>
+                    <div className="premium-form-v">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px', gap: '10px' }}>
+                            <input type="text" placeholder="Nombre" value={newWhaContact.name} onChange={e => setNewWhaContact({ ...newWhaContact, name: e.target.value })} />
+                            <input type="text" placeholder="Número (ej. 573...)" value={newWhaContact.number} onChange={e => setNewWhaContact({ ...newWhaContact, number: e.target.value })} />
+                            <button className="btn-process" onClick={handleCreateWhaContact} disabled={addingContact}>+</button>
+                        </div>
+                    </div>
+
+                    <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(245, 158, 11, 0.05)', borderRadius: '12px', border: '1px solid #f59e0b' }}>
+                        <h5 style={{ margin: '0 0 5px 0', color: '#f59e0b' }}>🔗 Webhook para Whaticket</h5>
+                        <p style={{ fontSize: '0.75rem', marginBottom: '10px', opacity: 0.8 }}>
+                            Para que la IA responda automáticamente, ve a la configuración de Whaticket y añade esta URL como Webhook:
+                        </p>
+                        <code style={{ fontSize: '0.65rem', wordBreak: 'break-all', color: 'var(--text-main)', background: '#000', padding: '5px', borderRadius: '4px', display: 'block' }}>
+                            {`https://tlezyskwzbhgdudmbfbn.supabase.co/functions/v1/meta-ai-agent?platform=whaticket&clinic_id=${clinicId}`}
+                        </code>
+                    </div>
+                </div>
+                <h4 style={{ marginBottom: '20px' }}>✍️ Plantillas de WhatsApp</h4>
+                <div className="premium-form-v">
+                    {whaticketTemplates.map((t, idx) => (
+                        <div key={idx} className="template-item" style={{ marginBottom: '20px', padding: '15px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                <strong>{t.event_type === 'booking_confirmation' ? '✅ Nueva Cita' : t.event_type === 'reminder_24h' ? '🕒 Recordatorio 24h' : '🚨 Aviso Inmediato'}</strong>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    <input type="checkbox" checked={t.is_active} onChange={e => {
+                                        const newT = [...whaticketTemplates];
+                                        newT[idx].is_active = e.target.checked;
+                                        setWhaticketTemplates(newT);
+                                    }} />
+                                    <small>Activo</small>
+                                </div>
+                            </div>
+                            <textarea value={t.content} onChange={e => {
+                                const newT = [...whaticketTemplates];
+                                newT[idx].content = e.target.value;
+                                setWhaticketTemplates(newT);
+                            }} rows="3" style={{ width: '100%', fontSize: '0.85rem' }} />
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '5px' }}>Variables: <code>{`{paciente}`}</code>, <code>{`{fecha}`}</code>, <code>{`{hora}`}</code></div>
+                        </div>
+                    ))}
                 </div>
             </div>
         </div>
@@ -2622,12 +2916,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
                             {agendaPerformance.map(perf => (
                                 <div key={perf.agenda.id} className="card-v4" style={{
-                                    background: 'rgba(255,255,255,0.03)',
+                                    background: 'var(--card-bg)',
                                     borderRadius: '20px',
                                     padding: '20px',
                                     border: '1px solid var(--glass-border)',
                                     position: 'relative',
-                                    overflow: 'hidden'
+                                    overflow: 'hidden',
+                                    boxShadow: '0 4px 15px rgba(0,0,0,0.05)'
                                 }}>
                                     <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--primary)' }}></div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
@@ -2686,10 +2981,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             {globalSmsLogs.length === 0 ? <p className="text-muted text-center" style={{ padding: '40px' }}>No hay registros de SMS</p> :
                                 globalSmsLogs.map(log => (
                                     <div key={log.id} style={{
-                                        background: 'rgba(255,255,255,0.03)',
+                                        background: 'var(--card-bg)',
                                         padding: '15px',
                                         borderRadius: '12px',
-                                        border: '1px solid rgba(255,255,255,0.05)'
+                                        border: '1px solid var(--glass-border)',
+                                        boxShadow: 'var(--shadow-sm)'
                                     }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                                             <span style={{
@@ -2705,7 +3001,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{new Date(log.created_at).toLocaleString()}</span>
                                         </div>
                                         <p style={{ fontSize: '0.85rem', margin: '4px 0', color: 'var(--text-main)' }}><strong>{log.patient_name}</strong> ({log.patient_phone})</p>
-                                        <p style={{ fontSize: '0.8rem', margin: '10px 0', opacity: 0.8, background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '4px', color: 'var(--text-main)' }}>
+                                        <p style={{ fontSize: '0.8rem', margin: '10px 0', opacity: 0.8, background: 'var(--chat-bubble-user-bg)', padding: '8px', borderRadius: '4px', color: 'var(--text-main)', border: '1px solid var(--glass-border)' }}>
                                             {log.message_content}
                                         </p>
                                         {log.status !== 'success' && (
@@ -2735,10 +3031,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             {globalEmailLogs.length === 0 ? <p className="text-muted text-center" style={{ padding: '40px' }}>No hay registros de Email</p> :
                                 globalEmailLogs.map(log => (
                                     <div key={log.id} style={{
-                                        background: 'rgba(255,255,255,0.03)',
+                                        background: 'var(--card-bg)',
                                         padding: '15px',
                                         borderRadius: '12px',
-                                        border: '1px solid rgba(255,255,255,0.05)'
+                                        border: '1px solid var(--glass-border)',
+                                        boxShadow: 'var(--shadow-sm)'
                                     }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                                             <span style={{
@@ -2903,6 +3200,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 <>
                                     <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 <span className="sidebar-text">SMS Automatizados</span></button>
                                     <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 <span className="sidebar-text">Email Automatizados</span></button>
+                                    <button className={activeView === "whatsapp" ? "active" : ""} onClick={() => setActiveView("whatsapp")}>💬 <span className="sidebar-text">WhatsApp (Whaticket)</span></button>
                                     <button className={activeView === "ai_agent" ? "active" : ""} onClick={() => setActiveView("ai_agent")}>🤖 <span className="sidebar-text">Agente IA</span></button>
                                     <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
                                 </>
@@ -2925,6 +3223,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "horarios" && renderConfigHorarios()}
                     {activeView === "sms" && renderSMS()}
                     {activeView === "email" && renderEmail()}
+                    {activeView === "whatsapp" && renderWhaticket()}
                     {activeView === "ai_agent" && <AiAgentSection clinicId={clinicId} />}
                     {activeView === "meta" && renderMetaConfig()}
                     {activeView === "logs" && renderLogs()}
@@ -3178,12 +3477,49 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             </div>
 
                             <div className="form-group">
-                                <label>Correo Electrónico {editingUser && <small>(Dejar igual para no cambiar)</small>}</label>
-                                <input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} required placeholder="ej: admin@correo.com" />
+                                <label>Correo Electrónico</label>
+                                <input
+                                    type="email"
+                                    value={newUser.email}
+                                    onChange={e => setNewUser({ ...newUser, email: e.target.value })}
+                                    required
+                                    placeholder="ej: admin@correo.com"
+                                />
                             </div>
                             <div className="form-group">
                                 <label>Contraseña {editingUser && <small>(Llenar solo para cambiarla)</small>}</label>
-                                <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} required={!editingUser} placeholder={editingUser ? "Nueva clave..." : "Mínimo 6 caracteres"} minLength="6" />
+                                <div style={{ position: 'relative', width: '100%' }}>
+                                    <input
+                                        type={showUserPassword ? "text" : "password"}
+                                        value={newUser.password}
+                                        onChange={e => setNewUser({ ...newUser, password: e.target.value })}
+                                        required={!editingUser}
+                                        placeholder={editingUser ? "Nueva clave..." : "Mínimo 6 caracteres"}
+                                        minLength="6"
+                                        style={{ paddingRight: '45px', width: '100%' }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowUserPassword(!showUserPassword)}
+                                        style={{
+                                            position: 'absolute',
+                                            right: '10px',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            fontSize: '1.2rem',
+                                            padding: '5px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            color: 'var(--text-muted)'
+                                        }}
+                                        title={showUserPassword ? "Ocultar" : "Mostrar"}
+                                    >
+                                        {showUserPassword ? "🙈" : "👁️"}
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="form-group">
@@ -3200,9 +3536,9 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     </div>
                                 )}
                             </div>
-                            <div className="modal-footer">
-                                <button type="button" className="btn-secondary" onClick={() => { setShowUserModal(false); setEditingUser(null); setNewUser({ full_name: "", username: "", email: "", password: "", role: "agent" }); }}>Cancelar</button>
-                                <button type="submit" className="btn-process" disabled={loading}>
+                            <div className="modal-footer" style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                                <button type="button" className="btn-delete" onClick={() => { setShowUserModal(false); setEditingUser(null); setShowUserPassword(false); setNewUser({ full_name: "", username: "", email: "", password: "", role: "agent" }); }}>Cancelar</button>
+                                <button type="submit" className="btn-process" disabled={loading} style={{ margin: 0 }}>
                                     {loading ? (editingUser ? "Guardando..." : "Creando...") : (editingUser ? "Guardar Cambios" : "Crear Usuario")}
                                 </button>
                             </div>

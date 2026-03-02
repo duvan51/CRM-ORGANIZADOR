@@ -49,6 +49,7 @@ serve(async (req) => {
             .update({
                 full_name,
                 username,
+                email,
                 role
             })
             .eq('id', userId)

@@ -103,22 +103,26 @@ const AiChatMonitor = () => {
                             </button>
                         </div>
                         <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', background: 'rgba(0,0,0,0.1)' }}>
-                            {messages.map(msg => (
-                                <div key={msg.id} style={{
-                                    alignSelf: msg.sender_type === 'user' ? 'flex-start' : 'flex-end',
-                                    maxWidth: '70%',
-                                    padding: '10px 15px',
-                                    borderRadius: '15px',
-                                    background: msg.sender_type === 'user' ? 'rgba(255,255,255,0.05)' : msg.sender_type === 'ai' ? 'var(--primary)' : 'var(--accent)',
-                                    color: msg.sender_type === 'user' ? 'inherit' : '#fff',
-                                    border: msg.sender_type === 'user' ? '1px solid var(--glass-border)' : 'none'
-                                }}>
-                                    <div style={{ fontSize: '0.85rem' }}>{msg.content}</div>
-                                    <div style={{ fontSize: '0.6rem', opacity: 0.7, marginTop: '5px', textAlign: 'right' }}>
-                                        {new Date(msg.created_at).toLocaleTimeString()} {msg.sender_type === 'ai' ? '(IA)' : ''}
+                            {messages.map(msg => {
+                                const isUser = msg.sender_type === 'user';
+                                const isAI = msg.sender_type === 'ai';
+                                return (
+                                    <div key={msg.id} style={{
+                                        alignSelf: isUser ? 'flex-start' : 'flex-end',
+                                        maxWidth: '70%',
+                                        padding: '10px 15px',
+                                        borderRadius: '15px',
+                                        background: isUser ? 'var(--chat-bubble-user-bg)' : isAI ? 'var(--chat-bubble-ai-bg)' : 'var(--chat-bubble-other-bg)',
+                                        color: isUser ? 'var(--chat-bubble-user-text)' : isAI ? 'var(--chat-bubble-ai-text)' : 'var(--chat-bubble-other-text)',
+                                        border: isUser ? '1px solid var(--glass-border)' : 'none'
+                                    }}>
+                                        <div style={{ fontSize: '0.85rem' }}>{msg.content}</div>
+                                        <div style={{ fontSize: '0.6rem', opacity: 0.7, marginTop: '5px', textAlign: 'right' }}>
+                                            {new Date(msg.created_at).toLocaleTimeString()} {isAI ? '(IA)' : ''}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </>
                 ) : (

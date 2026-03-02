@@ -133,7 +133,7 @@ const PatientTracking = ({ user, onScheduleNext }) => {
                                     <span>Progreso del Tratamiento</span>
                                     <strong>{p.completed} / {p.totalExpected} Sesiones</strong>
                                 </div>
-                                <div style={{ height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                                <div style={{ height: '8px', background: 'var(--btn-secondary-bg)', borderRadius: '4px', overflow: 'hidden' }}>
                                     <div style={{
                                         width: `${progress}%`,
                                         height: '100%',
@@ -147,7 +147,7 @@ const PatientTracking = ({ user, onScheduleNext }) => {
                                 <label style={{ fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: '800', color: 'var(--primary)' }}>Últimas Citas</label>
                                 <div style={{ marginTop: '10px' }}>
                                     {p.history.slice(0, 3).map((h, i) => (
-                                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '8px', padding: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+                                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '8px', padding: '8px', background: 'var(--btn-secondary-bg)', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
                                             <span>{h.fecha}</span>
                                             <span style={{ fontWeight: '600' }}>{h.confirmacion}</span>
                                         </div>

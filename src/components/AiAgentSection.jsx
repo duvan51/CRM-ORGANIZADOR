@@ -308,19 +308,23 @@ const AiAgentSection = ({ clinicId }) => {
                                     <p style={{ fontSize: '0.8rem' }}>Tengo acceso a tus {services.length} servicios y sigo tus instrucciones.</p>
                                 </div>
                             )}
-                            {testChat.map((msg, i) => (
-                                <div key={i} style={{
-                                    alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                                    background: msg.role === 'user' ? 'var(--primary)' : 'var(--glass-bg)',
-                                    color: msg.role === 'user' ? 'white' : 'var(--text-main)',
-                                    padding: '10px 15px',
-                                    borderRadius: msg.role === 'user' ? '15px 15px 2px 15px' : '15px 15px 15px 2px',
-                                    maxWidth: '85%',
-                                    boxShadow: 'var(--shadow-sm)'
-                                }}>
-                                    {msg.content}
-                                </div>
-                            ))}
+                            {testChat.map((msg, i) => {
+                                const isUser = msg.role === 'user';
+                                return (
+                                    <div key={i} style={{
+                                        alignSelf: isUser ? 'flex-end' : 'flex-start',
+                                        background: isUser ? 'var(--chat-bubble-other-bg)' : 'var(--chat-bubble-ai-bg)',
+                                        color: isUser ? 'var(--chat-bubble-other-text)' : 'var(--chat-bubble-ai-text)',
+                                        padding: '10px 15px',
+                                        borderRadius: isUser ? '15px 15px 2px 15px' : '15px 15px 15px 2px',
+                                        maxWidth: '85%',
+                                        boxShadow: 'var(--shadow-sm)',
+                                        border: isUser ? 'none' : '1px solid var(--chat-bubble-ai-bg)'
+                                    }}>
+                                        {msg.content}
+                                    </div>
+                                );
+                            })}
                             {isThinking && (
                                 <div style={{ alignSelf: 'flex-start', background: 'var(--glass-bg)', padding: '10px 15px', borderRadius: '15px' }}>
                                     Analizando servicios...

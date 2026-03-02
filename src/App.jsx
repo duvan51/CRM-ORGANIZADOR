@@ -579,7 +579,7 @@ function App() {
             <h1 style={{ margin: 0 }}>AndoCRM</h1>
           </div>
           <div className="header-controls">
-            {activeTab === "agenda" && <div className="hide-mobile"><SalesCounter user={user} /></div>}
+            <SalesCounter user={user} />
 
             <button
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -660,9 +660,11 @@ function App() {
                 </div>
               )}
 
-              <div className={`nav-tab ${activeTab === "chats" ? "active" : ""}`} onClick={() => setActiveTab("chats")}>
-                <span className="tab-icon">💬</span> <span className="tab-text">Chats</span>
-              </div>
+              {user.role !== "agent" && (
+                <div className={`nav-tab ${activeTab === "chats" ? "active" : ""}`} onClick={() => setActiveTab("chats")}>
+                  <span className="tab-icon">💬</span> <span className="tab-text">Chats</span>
+                </div>
+              )}
             </>
           )}
         </div>

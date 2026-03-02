@@ -239,7 +239,7 @@ const AgentDashboard = ({ user }) => {
         if (user.role === 'superuser' || user.role === 'admin' || user.role === 'owner') {
             const clinicId = user.clinic_id || user.id;
             const { data } = await supabase.from('profiles')
-                .select('full_name, username')
+                .select('full_name, username, email')
                 .eq('is_active', true)
                 .eq('clinic_id', clinicId);
             setAllSellers(data || []);
@@ -743,7 +743,8 @@ const AgentDashboard = ({ user }) => {
         const [metaAggregated, setMetaAggregated] = useState({});
         const [loading, setLoading] = useState(true);
         const [saving, setSaving] = useState(false);
-        const [isEditing, setIsEditing] = useState(false);
+        const [editingModalAgenda, setEditingModalAgenda] = useState(null);
+        const [modalLocalData, setModalLocalData] = useState(null);
 
         const currentYear = new Date().getFullYear();
         const currentMonth = new Date().getMonth(); // 0-11
@@ -824,22 +825,41 @@ const AgentDashboard = ({ user }) => {
             fetchConsolidated();
         }, [selectedMonth, selectedYear]);
 
-        const handleSave = async (agendaId, field, value) => {
+
+        const formatCOP = (val) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Math.round(val));
+
+        const handleOpenModal = (ag) => {
+            const currentData = manualData.find(d => d.agenda_id === ag.id) || { agendados_cop: 0, leads_received: 0, agent_stats: {} };
+            setModalLocalData({ ...currentData, agenda_id: ag.id, agenda_name: ag.name });
+            setEditingModalAgenda(ag);
+        };
+
+        const handleSaveModal = async () => {
             setSaving(true);
             const clinicId = user.clinic_id || user.id;
-            const existing = manualData.find(d => d.agenda_id === agendaId);
+
+            // Calculate totals from agent stats
+            let totalSales = 0;
+            let totalLeads = 0;
+            if (modalLocalData.agent_stats) {
+                Object.values(modalLocalData.agent_stats).forEach(s => {
+                    totalSales += (s.sales || 0);
+                    totalLeads += (s.leads || 0);
+                });
+            }
 
             const payload = {
                 clinic_id: clinicId,
-                agenda_id: agendaId === -1 ? null : agendaId,
+                agenda_id: modalLocalData.agenda_id === -1 ? null : modalLocalData.agenda_id,
                 month: selectedMonth + 1,
                 year: selectedYear,
-                ...(existing || {}),
-                [field]: value,
+                ...modalLocalData,
+                agendados_cop: totalSales,
+                leads_received: totalLeads,
                 updated_at: new Date().toISOString()
             };
 
-            // Eliminar ids nulos o problematicos si existen en el spread de 'existing'
+            delete payload.agenda_name; // Cleanup before save
             if (payload.id === undefined) delete payload.id;
 
             const { data, error } = await supabase
@@ -850,14 +870,15 @@ const AgentDashboard = ({ user }) => {
 
             if (!error) {
                 setManualData(prev => {
-                    const filtered = prev.filter(d => d.agenda_id !== agendaId);
+                    const filtered = prev.filter(d => d.agenda_id !== modalLocalData.agenda_id);
                     return [...filtered, data];
                 });
+                setEditingModalAgenda(null);
+            } else {
+                alert("Error al guardar: " + error.message);
             }
             setSaving(false);
         };
-
-        const formatCOP = (val) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Math.round(val));
 
         return (
             <div className="consolidated-view animate-in">
@@ -896,25 +917,10 @@ const AgentDashboard = ({ user }) => {
 
                         <div style={{ flex: 1 }}></div>
 
-                        <button
-                            className={`btn-${isEditing ? 'success' : 'primary'}`}
-                            onClick={() => setIsEditing(!isEditing)}
-                            style={{
-                                padding: '10px 25px',
-                                borderRadius: '25px',
-                                display: 'flex',
-                                gap: '10px',
-                                alignItems: 'center',
-                                fontWeight: '700',
-                                fontSize: '0.95rem',
-                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                boxShadow: isEditing ? '0 10px 20px rgba(16, 185, 129, 0.3)' : '0 10px 20px rgba(99, 102, 241, 0.3)',
-                                border: '1px solid rgba(255,255,255,0.1)'
-                            }}
-                        >
-                            <span style={{ fontSize: '1.2rem' }}>{isEditing ? '🔒' : '🔓'}</span>
-                            {isEditing ? 'Finalizar Edición' : 'Editar Datos'}
-                        </button>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: 'var(--card-bg)', padding: '5px 15px', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                            <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>Modo Vista:</span>
+                            <strong style={{ fontSize: '0.9rem', color: 'var(--primary)' }}>Reporte Consolidado</strong>
+                        </div>
                     </div>
 
                     <div className="months-navigation" style={{
@@ -997,30 +1003,21 @@ const AgentDashboard = ({ user }) => {
                                                 <td style={{ padding: '12px', color: 'var(--text-muted)' }}>{formatCOP(adsSpend)}</td>
                                                 <td style={{ padding: '12px' }}>
                                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                                                        {isEditing && !isGlobalRow ? (
-                                                            <input
-                                                                type="number"
-                                                                placeholder="$ 0"
-                                                                value={man.agendados_cop || ''}
-                                                                onChange={e => {
-                                                                    const val = parseFloat(e.target.value) || 0;
-                                                                    setManualData(prev => {
-                                                                        const existing = prev.find(d => d.agenda_id === ag.id);
-                                                                        if (existing) return prev.map(d => d.agenda_id === ag.id ? { ...d, agendados_cop: val } : d);
-                                                                        return [...prev, { agenda_id: ag.id, agendados_cop: val }];
-                                                                    });
-                                                                }}
-                                                                onBlur={e => handleSave(ag.id, 'agendados_cop', parseFloat(e.target.value) || 0)}
-                                                                style={{
-                                                                    background: '#ffffff', border: '2px solid var(--primary)', color: '#1a1a1a',
-                                                                    padding: '8px', borderRadius: '8px', width: '150px', fontWeight: 'bold', fontSize: '1rem'
-                                                                }}
-                                                            />
-                                                        ) : (
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                                             <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: isGlobalRow ? 'var(--primary)' : 'inherit' }}>
                                                                 {formatCOP(man.agendados_cop)}
                                                             </span>
-                                                        )}
+                                                            {!isGlobalRow && (
+                                                                <button
+                                                                    className="btn-icon-mini"
+                                                                    onClick={() => handleOpenModal(ag)}
+                                                                    title="Editar Rentabilidad"
+                                                                    style={{ padding: '4px', background: 'rgba(var(--primary-rgb), 0.1)', border: '1px solid var(--primary)', borderRadius: '6px' }}
+                                                                >
+                                                                    ✏️
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                         <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
                                                             <div style={{ width: `${progress}%`, height: '100%', background: 'var(--primary)', transition: 'width 0.3s ease' }}></div>
                                                         </div>
@@ -1056,25 +1053,7 @@ const AgentDashboard = ({ user }) => {
                                                     </div>
                                                 </td>
                                                 <td style={{ padding: '12px' }}>
-                                                    {isEditing && !isGlobalRow ? (
-                                                        <input
-                                                            type="number"
-                                                            placeholder="0 leads"
-                                                            value={man.leads_received || ''}
-                                                            onChange={e => {
-                                                                const val = parseInt(e.target.value) || 0;
-                                                                setManualData(prev => {
-                                                                    const existing = prev.find(d => d.agenda_id === ag.id);
-                                                                    if (existing) return prev.map(d => d.agenda_id === ag.id ? { ...d, leads_received: val } : d);
-                                                                    return [...prev, { agenda_id: ag.id, leads_received: val }];
-                                                                });
-                                                            }}
-                                                            onBlur={e => handleSave(ag.id, 'leads_received', parseInt(e.target.value) || 0)}
-                                                            style={{ background: '#ffffff', border: '1px solid #ced4da', color: '#1a1a1a', padding: '8px', borderRadius: '6px', width: '80px', fontWeight: '600' }}
-                                                        />
-                                                    ) : (
-                                                        <span style={{ fontWeight: '600', color: isGlobalRow ? 'var(--primary)' : 'inherit' }}>{man.leads_received || 0} Leads</span>
-                                                    )}
+                                                    <span style={{ fontWeight: '600', color: isGlobalRow ? 'var(--primary)' : 'inherit' }}>{man.leads_received || 0} Leads</span>
                                                 </td>
                                             </tr>
                                             {/* Desempeño por Agente (Celdas anidadas) */}
@@ -1096,36 +1075,9 @@ const AgentDashboard = ({ user }) => {
                                                                     borderRadius: '15px', border: '1px solid var(--glass-border)'
                                                                 }}>
                                                                     <span style={{ fontSize: '0.75rem' }}>{sName}:</span>
-                                                                    {isEditing && !isGlobalRow ? (
-                                                                        <>
-                                                                            <input
-                                                                                type="number" placeholder="$"
-                                                                                value={sData.sales || ''}
-                                                                                onChange={e => {
-                                                                                    const val = parseFloat(e.target.value) || 0;
-                                                                                    const nextStats = { ...man.agent_stats, [sName]: { ...sData, sales: val } };
-                                                                                    setManualData(prev => prev.map(d => d.agenda_id === ag.id ? { ...d, agent_stats: nextStats } : d));
-                                                                                }}
-                                                                                onBlur={e => handleSave(ag.id, 'agent_stats', { ...man.agent_stats, [sName]: { ...sData, sales: parseFloat(e.target.value) || 0 } })}
-                                                                                style={{ background: '#ffffff', border: '1px solid var(--primary)', color: '#1a1a1a', width: '80px', fontSize: '0.7rem', borderRadius: '4px', padding: '2px', textAlign: 'center' }}
-                                                                            />
-                                                                            <input
-                                                                                type="number" placeholder="L"
-                                                                                value={sData.leads || ''}
-                                                                                onChange={e => {
-                                                                                    const val = parseInt(e.target.value) || 0;
-                                                                                    const nextStats = { ...man.agent_stats, [sName]: { ...sData, leads: val } };
-                                                                                    setManualData(prev => prev.map(d => d.agenda_id === ag.id ? { ...d, agent_stats: nextStats } : d));
-                                                                                }}
-                                                                                onBlur={e => handleSave(ag.id, 'agent_stats', { ...man.agent_stats, [sName]: { ...sData, leads: parseInt(e.target.value) || 0 } })}
-                                                                                style={{ background: '#f0f0f0', border: '1px solid #ccc', color: '#333', width: '40px', fontSize: '0.75rem', borderRadius: '4px', padding: '2px', textAlign: 'center' }}
-                                                                            />
-                                                                        </>
-                                                                    ) : (
-                                                                        <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--primary)' }}>
-                                                                            {formatCOP(sData.sales)} ({sData.leads || 0}L)
-                                                                        </span>
-                                                                    )}
+                                                                    <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                                                                        {formatCOP(sData.sales)} ({sData.leads || 0}L)
+                                                                    </span>
                                                                 </div>
                                                             );
                                                         })}
@@ -1139,6 +1091,133 @@ const AgentDashboard = ({ user }) => {
                         </table>
                     </div>
                 </div>
+
+                {/* MODAL: CALCULADORA DE RENTABILIDAD */}
+                {editingModalAgenda && modalLocalData && (
+                    <div className="modal-overlay" onClick={() => setEditingModalAgenda(null)}>
+                        <div className="modal-content premium-modal animate-in" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px', width: '95%' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--glass-border)', paddingBottom: '15px' }}>
+                                <div>
+                                    <h2 style={{ margin: 0 }}>🧮 Calculadora de Ventas</h2>
+                                    <p style={{ margin: '5px 0 0 0', color: 'var(--primary)', fontWeight: 'bold' }}>Sede: {modalLocalData.agenda_name}</p>
+                                </div>
+                                <button className="btn-close" onClick={() => setEditingModalAgenda(null)}>×</button>
+                            </div>
+
+                            <div className="modal-scroll" style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: '10px' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead style={{ position: 'sticky', top: 0, background: 'var(--card-bg)', zIndex: 10 }}>
+                                        <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--glass-border)' }}>
+                                            <th style={{ padding: '12px', fontSize: '0.8rem', textTransform: 'uppercase' }}>Agente / Vendedor</th>
+                                            <th style={{ padding: '12px', fontSize: '0.8rem', textTransform: 'uppercase' }}>Ventas ($ COP)</th>
+                                            <th style={{ padding: '12px', fontSize: '0.8rem', textTransform: 'uppercase' }}>Leads (L)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {allSellersWithGeneral.map(seller => {
+                                            const sName = seller.full_name || seller.username;
+                                            const sData = modalLocalData.agent_stats?.[sName] || { sales: 0, leads: 0 };
+
+                                            return (
+                                                <tr key={sName} style={{ borderBottom: '1px solid var(--glass-border)' }}>
+                                                    <td style={{ padding: '15px 12px' }}>
+                                                        <div style={{ fontWeight: '600' }}>{sName}</div>
+                                                        {sName.includes("GENERAL") && <small style={{ opacity: 0.7 }}>Venta directa sin cita previa</small>}
+                                                    </td>
+                                                    <td style={{ padding: '12px' }}>
+                                                        <div style={{ position: 'relative' }}>
+                                                            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.6 }}>$</span>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="0"
+                                                                value={(sData.sales || 0).toLocaleString()}
+                                                                onChange={e => {
+                                                                    const val = parseFloat(e.target.value.replace(/\D/g, '')) || 0;
+                                                                    setModalLocalData(prev => ({
+                                                                        ...prev,
+                                                                        agent_stats: {
+                                                                            ...(prev.agent_stats || {}),
+                                                                            [sName]: { ...sData, sales: val }
+                                                                        }
+                                                                    }));
+                                                                }}
+                                                                style={{
+                                                                    width: '100%', padding: '10px 10px 10px 25px', borderRadius: '8px',
+                                                                    background: 'var(--btn-secondary-bg)', border: '1px solid var(--glass-border)',
+                                                                    color: 'var(--text-main)', fontWeight: '700', fontSize: '1rem'
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '12px' }}>
+                                                        <input
+                                                            type="number"
+                                                            placeholder="0"
+                                                            value={sData.leads || ''}
+                                                            onChange={e => {
+                                                                const val = parseInt(e.target.value) || 0;
+                                                                setModalLocalData(prev => ({
+                                                                    ...prev,
+                                                                    agent_stats: {
+                                                                        ...(prev.agent_stats || {}),
+                                                                        [sName]: { ...sData, leads: val }
+                                                                    }
+                                                                }));
+                                                            }}
+                                                            style={{
+                                                                width: '80px', padding: '10px', borderRadius: '8px',
+                                                                background: 'var(--btn-secondary-bg)', border: '1px solid var(--glass-border)',
+                                                                color: 'var(--text-main)', textAlign: 'center', fontWeight: '700'
+                                                            }}
+                                                        />
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="calculator-footer" style={{
+                                marginTop: '20px', padding: '20px', background: 'rgba(var(--primary-rgb), 0.05)',
+                                borderRadius: '15px', border: '1px solid var(--primary)'
+                            }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                                    <div style={{ textAlign: 'center' }}>
+                                        <span style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', opacity: 0.8, color: 'var(--primary)', fontWeight: 'bold' }}>Total Ventas (Consolidado)</span>
+                                        <span style={{ fontSize: '1.6rem', fontWeight: '900' }}>
+                                            {formatCOP(Object.values(modalLocalData.agent_stats || {}).reduce((a, b) => a + (b.sales || 0), 0))}
+                                        </span>
+                                    </div>
+                                    <div style={{ textAlign: 'center' }}>
+                                        <span style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', opacity: 0.8, color: 'var(--primary)', fontWeight: 'bold' }}>Total Leads</span>
+                                        <span style={{ fontSize: '1.6rem', fontWeight: '900' }}>
+                                            {Object.values(modalLocalData.agent_stats || {}).reduce((a, b) => a + (b.leads || 0), 0)} Lead(s)
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '15px', marginTop: '25px' }}>
+                                <button
+                                    className="btn-process"
+                                    style={{ flex: 2, padding: '15px', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold' }}
+                                    onClick={handleSaveModal}
+                                    disabled={saving}
+                                >
+                                    {saving ? '⏳ Guardando...' : '✅ Guardar y Actualizar Reporte'}
+                                </button>
+                                <button
+                                    className="btn-secondary"
+                                    style={{ flex: 1, padding: '15px', borderRadius: '12px' }}
+                                    onClick={() => setEditingModalAgenda(null)}
+                                >
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         );
     };

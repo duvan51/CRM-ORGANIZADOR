@@ -66,6 +66,9 @@ serve(async (req) => {
         let pageAccessToken = ''
 
         let metaMessageId = '';
+        const urlPlatform = url.searchParams.get('platform')
+        const urlClinicId = url.searchParams.get('clinic_id')
+
         if (isHumanReply) {
             text = body.text
             externalUserId = body.external_user_id
@@ -73,6 +76,16 @@ serve(async (req) => {
         } else if (isTest) {
             text = body.text
             externalUserId = 'test-user'
+        } else if (urlPlatform === 'whaticket') {
+            platform = 'whaticket'
+            clinicId = urlClinicId || body.clinicId
+            const msgData = body.data || body
+            // Ignorar mensajes enviados desde Whaticket (fromMe)
+            if (msgData.fromMe === true) return new Response('Ignore fromMe', { status: 200, headers: corsHeaders })
+
+            text = msgData.body || ''
+            externalUserId = msgData.contact?.number || msgData.number || ''
+            metaMessageId = msgData.id || ''
         } else {
             if (body.object === 'page' || body.object === 'instagram') {
                 const entry = body.entry?.[0]
@@ -142,6 +155,10 @@ serve(async (req) => {
             } else if (isHumanReply && platform === 'whatsapp') {
                 phoneId = config.phone_id
             }
+        } else if (platform === 'whaticket' && targetClinicId) {
+            // Caso Whaticket: Ya tenemos el clinicId de la URL o Body
+            const { data } = await supabaseServer.from('ai_agent_config').select('*').eq('clinic_id', targetClinicId).single()
+            config = data
         } else if (platform === 'whatsapp' && phoneId) {
             // Caso WhatsApp: Buscamos por phone_id
             const { data } = await supabaseServer.from('ai_agent_config').select('*').eq('phone_id', phoneId).eq('is_active', true).single()
@@ -579,6 +596,22 @@ serve(async (req) => {
                         message: { text: part }
                     })
                 })
+            } else if (platform === 'whaticket') {
+                const { data: whaConfig } = await supabaseServer.from('whaticket_configs').select('*').eq('clinic_id', targetClinicId || config.clinic_id).single();
+                if (whaConfig && whaConfig.is_active) {
+                    await fetch(`${whaConfig.base_url}/messages`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${whaConfig.api_key}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            number: externalUserId,
+                            body: part,
+                            whatsappId: whaConfig.whatsapp_id
+                        })
+                    });
+                }
             }
 
             await supabaseServer.from('meta_messages').upsert({
@@ -610,7 +643,8 @@ serve(async (req) => {
         })
 
     } catch (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return new Response(JSON.stringify({ error: errorMsg }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 500
         })

@@ -70,10 +70,6 @@ const ConversationsManager = ({ clinicId }) => {
 
         return () => {
             if (refreshTimer) clearTimeout(refreshTimer);
-            supabase.removeChannel(channel);
-        };
-        return () => {
-            if (refreshTimer) clearTimeout(refreshTimer);
             console.log("🔌 Desconectando canal de Realtime...");
             supabase.removeChannel(channel);
         };
@@ -101,12 +97,27 @@ const ConversationsManager = ({ clinicId }) => {
                 .eq('clinic_id', clinicId)
                 .single();
 
+            // Whaticket Config
+            const { data: whaData } = await supabase
+                .from('whaticket_configs')
+                .select('is_active, whatsapp_id')
+                .eq('clinic_id', clinicId)
+                .single();
+
             const accounts = [...(socialData || [])];
             if (waData?.phone_id && waData.is_active) {
                 accounts.push({
                     id: 'whatsapp-main',
                     platform: 'whatsapp',
-                    name: `WA: ${waData.phone_id}`,
+                    name: `WA Cloud: ${waData.phone_id}`,
+                    is_active: true
+                });
+            }
+            if (whaData?.is_active) {
+                accounts.push({
+                    id: 'whaticket-main',
+                    platform: 'whaticket',
+                    name: `Whaticket (ID: ${whaData.whatsapp_id || '?'})`,
                     is_active: true
                 });
             }
@@ -246,7 +257,7 @@ const ConversationsManager = ({ clinicId }) => {
         <div className="conversations-manager-screen fade-in" style={{ display: 'flex', height: 'calc(100vh - 120px)', background: 'var(--card-bg)', borderRadius: '20px', overflow: 'hidden', border: '1px solid var(--glass-border)', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
 
             {/* Sidebar de Chats */}
-            <div className="chats-sidebar" style={{ width: '350px', borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.02)' }}>
+            <div className="chats-sidebar" style={{ width: '350px', borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', background: 'var(--chat-sidebar-bg)' }}>
                 <div style={{ padding: '25px', borderBottom: '1px solid var(--glass-border)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                         <h3 style={{ margin: 0, fontSize: '1.4rem' }}>Conversaciones</h3>
@@ -384,7 +395,7 @@ const ConversationsManager = ({ clinicId }) => {
             </div>
 
             {/* Area de Chat */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.15)' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.05)' }}>
                 {selectedConv ? (
                     <>
                         <div style={{ padding: '20px 30px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--card-bg)' }}>
@@ -448,9 +459,9 @@ const ConversationsManager = ({ clinicId }) => {
                                                 padding: '12px 18px',
                                                 borderRadius: isUser ? '20px 20px 20px 5px' : '20px 20px 5px 20px',
                                                 fontSize: '0.95rem',
-                                                background: isUser ? 'rgba(255,255,255,0.05)' : isAI ? 'rgba(var(--primary-rgb), 0.2)' : 'var(--primary)',
-                                                border: isUser ? '1px solid var(--glass-border)' : isAI ? '1px solid var(--primary)' : 'none',
-                                                color: 'white',
+                                                background: isUser ? 'var(--chat-bubble-user-bg)' : isAI ? 'var(--chat-bubble-ai-bg)' : 'var(--chat-bubble-other-bg)',
+                                                border: isUser ? '1px solid var(--glass-border)' : isAI ? '1px solid var(--chat-bubble-ai-bg)' : 'none',
+                                                color: isUser ? 'var(--chat-bubble-user-text)' : isAI ? 'var(--chat-bubble-ai-text)' : 'var(--chat-bubble-other-text)',
                                                 boxShadow: isUser ? 'none' : '0 4px 15px rgba(0,0,0,0.1)',
                                                 wordBreak: 'break-word',
                                                 whiteSpace: 'pre-wrap',
@@ -479,9 +490,9 @@ const ConversationsManager = ({ clinicId }) => {
                                 placeholder={`Responder como ${selectedConv.status === 'ai_handling' ? 'humano (IA se pausará)' : 'humano'}...`}
                                 style={{
                                     flex: 1,
-                                    background: 'rgba(255,255,255,0.05)',
+                                    background: 'var(--chat-input-bg)',
                                     border: '1px solid var(--glass-border)',
-                                    color: 'white',
+                                    color: 'var(--chat-input-text)',
                                     padding: '12px 20px',
                                     borderRadius: '12px',
                                     fontSize: '0.95rem',
@@ -524,14 +535,14 @@ const ConversationsManager = ({ clinicId }) => {
                     background: transparent;
                 }
                 .custom-scrollbar::-webkit-scrollbar-thumb {
-                    background: rgba(255,255,255,0.1);
+                    background: var(--glass-border);
                     border-radius: 10px;
                 }
                 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                    background: rgba(255,255,255,0.2);
+                    background: var(--text-muted);
                 }
                 .chat-item-hover:hover {
-                    background: rgba(255,255,255,0.05) !important;
+                    background: var(--chat-input-bg) !important;
                 }
                 @keyframes spin {
                     from { transform: rotate(0deg); }
