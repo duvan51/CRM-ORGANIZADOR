@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabase";
+import VoiceCall from "./VoiceCall";
+
 
 const ConversationsManager = ({ clinicId }) => {
     const [conversations, setConversations] = useState([]);
@@ -13,6 +15,8 @@ const ConversationsManager = ({ clinicId }) => {
     const [syncingPastMessages, setSyncingPastMessages] = useState(false);
     const [realtimeStatus, setRealtimeStatus] = useState("connecting");
     const [syncMode, setSyncMode] = useState(true); // true = auto (live), false = manual
+    const [showVoiceCall, setShowVoiceCall] = useState(null); // holds phone number
+
     const messagesEndRef = useRef(null);
     const selectedConvRef = useRef(null);
 
@@ -418,7 +422,32 @@ const ConversationsManager = ({ clinicId }) => {
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
                                         <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }}></span>
                                         <small style={{ opacity: 0.6, fontSize: '0.75rem' }}>ID: {selectedConv.id.substring(0, 8)} | {selectedConv.platform}</small>
+                                        {(selectedConv.platform === 'whatsapp' || selectedConv.platform === 'whaticket') && (
+                                            <button
+                                                onClick={() => {
+                                                    let num = selectedConv.external_user_id;
+                                                    if (!num.startsWith('+')) num = '+' + num;
+                                                    setShowVoiceCall(num);
+                                                }}
+                                                style={{
+                                                    background: 'rgba(74, 222, 128, 0.1)',
+                                                    border: '1px solid #4ade80',
+                                                    borderRadius: '4px',
+                                                    color: '#4ade80',
+                                                    fontSize: '0.7rem',
+                                                    padding: '2px 6px',
+                                                    cursor: 'pointer',
+                                                    marginLeft: '10px',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '4px'
+                                                }}
+                                            >
+                                                📞 Llamar
+                                            </button>
+                                        )}
                                     </div>
+
                                 </div>
                             </div>
 
@@ -574,7 +603,16 @@ const ConversationsManager = ({ clinicId }) => {
                     100% { opacity: 1; }
                 }
             ` }} />
+
+            {showVoiceCall && (
+                <VoiceCall
+                    clinicId={clinicId}
+                    phoneNumber={showVoiceCall}
+                    onEnd={() => setShowVoiceCall(null)}
+                />
+            )}
         </div>
+
     );
 };
 

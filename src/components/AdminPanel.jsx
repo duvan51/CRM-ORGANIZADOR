@@ -88,6 +88,11 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     ]);
     const [savingWhaticket, setSavingWhaticket] = useState(false);
 
+    // Twilio States
+    const [twilioConfig, setTwilioConfig] = useState({ account_sid: "", auth_token: "", api_key_sid: "", api_key_secret: "", twilio_number: "", twiml_app_sid: "", is_active: true });
+    const [savingTwilio, setSavingTwilio] = useState(false);
+
+
     // States for Modals
     const [showAgentModal, setShowAgentModal] = useState(null); // stores agenda object
     const [showEditAgenda, setShowEditAgenda] = useState(null);
@@ -264,6 +269,10 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 });
             }
 
+            // --- CARGAR CONFIG TWILIO ---
+            const { data: tConfig } = await supabase.from('twilio_configs').select('*').eq('clinic_id', currentClinicId).maybeSingle();
+            if (tConfig) setTwilioConfig(tConfig);
+
             await fetchMetaData(currentClinicId);
             if (currentClinicId) fetchWhaticketConnections(currentClinicId);
         } catch (error) {
@@ -271,6 +280,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
         setLoading(false);
     };
+
+
 
     const fetchMetaData = async (cid = null) => {
         const targetClinicId = cid || clinicId;
@@ -1574,6 +1585,36 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
     };
 
+    const handleSaveTwilio = async (e) => {
+        e.preventDefault();
+        setSavingTwilio(true);
+        try {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) return;
+
+            const configToSave = {
+                clinic_id: clinicId || authUser.id,
+                ...twilioConfig
+            };
+            delete configToSave.id;
+            delete configToSave.created_at;
+            delete configToSave.updated_at;
+
+            const { error: cfgError } = await supabase.from('twilio_configs').upsert(configToSave, { onConflict: 'clinic_id' });
+            if (cfgError) throw cfgError;
+
+            alert("✅ Configuración de Twilio guardada correctamente.");
+            fetchData();
+        } catch (error) {
+            console.error(error);
+            alert("❌ Error al guardar Twilio: " + error.message);
+        } finally {
+            setSavingTwilio(false);
+        }
+    };
+
+
+
     const fetchWhaticketConnections = async (cid = null) => {
         const targetId = cid || clinicId;
         if (!whaticketConfig.api_key || !whaticketConfig.base_url) return;
@@ -1788,7 +1829,114 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         </div>
     );
 
+    const renderTwilio = () => {
+        return (
+            <div className="admin-section fade-in">
+                <div className="section-header">
+                    <h3>📞 Configuración de Twilio Voice</h3>
+                    <p className="text-muted">Integra llamadas telefónicas directamente desde el CRM.</p>
+                </div>
+
+                <div className="premium-card">
+                    <form onSubmit={handleSaveTwilio} className="premium-form-v">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <div className="form-group">
+                                <label>Twilio Account SID</label>
+                                <input
+                                    type="text"
+                                    value={twilioConfig.account_sid}
+                                    onChange={e => setTwilioConfig({ ...twilioConfig, account_sid: e.target.value })}
+                                    required
+                                    placeholder="ACxxxxxxxx..."
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Twilio Auth Token</label>
+                                <input
+                                    type="password"
+                                    value={twilioConfig.auth_token}
+                                    onChange={e => setTwilioConfig({ ...twilioConfig, auth_token: e.target.value })}
+                                    placeholder="Solo si no usas API Key"
+                                />
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <div className="form-group">
+                                <label>API Key SID (Recomendado)</label>
+                                <input
+                                    type="text"
+                                    value={twilioConfig.api_key_sid}
+                                    onChange={e => setTwilioConfig({ ...twilioConfig, api_key_sid: e.target.value })}
+                                    placeholder="SKxxxxxxxx..."
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>API Key Secret</label>
+                                <input
+                                    type="password"
+                                    value={twilioConfig.api_key_secret}
+                                    onChange={e => setTwilioConfig({ ...twilioConfig, api_key_secret: e.target.value })}
+                                    placeholder="Secret para generar Access Tokens"
+                                />
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <div className="form-group">
+                                <label>Número de Twilio (Caller ID)</label>
+                                <input
+                                    type="text"
+                                    value={twilioConfig.twilio_number}
+                                    onChange={e => setTwilioConfig({ ...twilioConfig, twilio_number: e.target.value })}
+                                    placeholder="+1xxxxxxxxxx"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>TwiML App SID</label>
+                                <input
+                                    type="text"
+                                    value={twilioConfig.twiml_app_sid}
+                                    onChange={e => setTwilioConfig({ ...twilioConfig, twiml_app_sid: e.target.value })}
+                                    placeholder="APxxxxxxxx..."
+                                />
+                            </div>
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: '20px' }}>
+                            <label className="checkbox-item" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={twilioConfig.is_active}
+                                    onChange={e => setTwilioConfig({ ...twilioConfig, is_active: e.target.checked })}
+                                />
+                                <span style={{ fontSize: '0.9rem' }}>Servicio de Llamadas Activo</span>
+                            </label>
+                        </div>
+
+                        <button type="submit" className="btn-process" disabled={savingTwilio}>
+                            {savingTwilio ? "Guardando..." : "💾 Guardar Configuración de Twilio"}
+                        </button>
+                    </form>
+                </div>
+
+                <div className="premium-card" style={{ marginTop: '20px', border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb), 0.05)' }}>
+                    <h4 style={{ color: 'var(--accent)' }}>💡 Instrucciones para Llamadas con Navegador</h4>
+                    <p style={{ fontSize: '0.85rem', lineHeight: '1.6' }}>
+                        1. Crea una <strong>TwiML App</strong> en tu consola de Twilio.<br />
+                        2. Configura la <strong>Voice URL</strong> de la TwiML App apuntando a la Edge Function: <br />
+                        <code style={{ background: '#000', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
+                            {import.meta.env.VITE_SUPABASE_URL}/functions/v1/twilio-voice
+                        </code><br />
+                        3. Genera un <strong>API Key</strong> y <strong>Secret</strong> para mayor seguridad en la generación de tokens.
+                    </p>
+                </div>
+            </div>
+        );
+    };
+
     const renderEmail = () => (
+
         <div className="admin-section fade-in">
             <div className="section-header">
                 <div>
@@ -3203,6 +3351,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <button className={activeView === "whatsapp" ? "active" : ""} onClick={() => setActiveView("whatsapp")}>💬 <span className="sidebar-text">WhatsApp (Whaticket)</span></button>
                                     <button className={activeView === "ai_agent" ? "active" : ""} onClick={() => setActiveView("ai_agent")}>🤖 <span className="sidebar-text">Agente IA</span></button>
                                     <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
+                                    <button className={activeView === "twilio" ? "active" : ""} onClick={() => setActiveView("twilio")}>📞 <span className="sidebar-text">Twilio Llamadas</span></button>
+
                                 </>
                             )}
                             <button className={activeView === "logs" ? "active" : ""} onClick={() => { setActiveView("logs"); fetchGlobalLogs(); }}>📜 <span className="sidebar-text">Monitoreo</span></button>
@@ -3226,6 +3376,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "whatsapp" && renderWhaticket()}
                     {activeView === "ai_agent" && <AiAgentSection clinicId={clinicId} />}
                     {activeView === "meta" && renderMetaConfig()}
+                    {activeView === "twilio" && renderTwilio()}
+
                     {activeView === "logs" && renderLogs()}
                     {activeView === "superconfig" && renderSuperConfig()}
                 </div>
@@ -3808,4 +3960,6 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     );
 };
 
+
 export default AdminPanel;
+

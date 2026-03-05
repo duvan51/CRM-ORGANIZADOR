@@ -1,0 +1,28 @@
+/* CSS for General/Excel view in Agenda */
+.general-view-container {
+    animation: fadeInDown 0.4s ease-out forwards;
+}
+
+.table-row-hover:hover td {
+    background: rgba(99, 102, 241, 0.05) !important;
+}
+
+.table-responsive {
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary) transparent;
+}
+
+.table-responsive::-webkit-scrollbar {
+    height: 8px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb {
+    background: var(--primary);
+    border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+    .excel-filters {
+        grid-template-columns: 1fr !important;
+    }
+}

@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../supabase";
 import ConfirmModal from "./ConfirmModal";
+import VoiceCall from "./VoiceCall";
+import "../excel_view.css";
+
 
 const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, onEditCita, onScheduleNext }) => {
 
@@ -24,8 +27,15 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
     };
 
 
-    const [viewMode, setViewMode] = useState("month"); // "month", "week", "day"
+    const [viewMode, setViewMode] = useState("month"); // "month", "week", "day", "general"
     const [selectedDayOptions, setSelectedDayOptions] = useState(null);
+
+    // Filters for General View
+    const [filterSearch, setFilterSearch] = useState("");
+    const [filterDateStart, setFilterDateStart] = useState(new Date().toISOString().split('T')[0]);
+    const [filterDateEnd, setFilterDateEnd] = useState("");
+    const [filterStatus, setFilterStatus] = useState("");
+
     const [confirmModal, setConfirmModal] = useState({
         isOpen: false,
         title: "",
@@ -34,6 +44,9 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
         type: "confirm",
         onConfirm: () => { }
     });
+
+    const [showVoiceCall, setShowVoiceCall] = useState(null);
+
 
     useEffect(() => {
         if (agendaId) {
@@ -45,6 +58,18 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
             fetchServiceSchedules();
         }
     }, [agendaId]);
+
+    // Sync filter dates with currentDate when in general mode
+    useEffect(() => {
+        if (viewMode === "general") {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            const start = new Date(year, month, 1);
+            const end = new Date(year, month + 1, 0);
+            setFilterDateStart(getLocalDateStr(start));
+            setFilterDateEnd(getLocalDateStr(end));
+        }
+    }, [currentDate, viewMode]);
 
 
 
@@ -537,7 +562,6 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
         );
     };
 
-
     const renderDayView = () => {
         const dateStr = getLocalDateStr(currentDate);
         const dayCitas = citas.filter(c => c.fecha === dateStr);
@@ -616,7 +640,21 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
                                                 <strong>{c.hora}</strong> - {c.nombres_completos} ({c.servicios})
                                             </div>
                                             <div style={{ display: 'flex', gap: '8px' }}>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        let num = c.celular;
+                                                        if (num && !num.startsWith('+')) num = '+' + num;
+                                                        setShowVoiceCall(num);
+                                                    }}
+                                                    className="btn-edit-tiny"
+                                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', opacity: 0.8 }}
+                                                    title="Llamada Twilio"
+                                                >
+                                                    📞
+                                                </button>
                                                 {canModify(c) && (
+
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); onEditCita(c); }}
                                                         className="btn-edit-tiny"
@@ -665,10 +703,178 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
     };
 
 
+    const renderGeneralView = () => {
+        const filteredCitas = citas.filter(c => {
+            const matchesSearch = !filterSearch ||
+                (c.nombres_completos || "").toLowerCase().includes(filterSearch.toLowerCase()) ||
+                (c.documento || "").toLowerCase().includes(filterSearch.toLowerCase()) ||
+                (c.celular || "").toLowerCase().includes(filterSearch.toLowerCase());
+
+            const matchesDateStart = !filterDateStart || c.fecha >= filterDateStart;
+            const matchesDateEnd = !filterDateEnd || c.fecha <= filterDateEnd;
+            const matchesStatus = !filterStatus || c.confirmacion === filterStatus;
+            const matchesService = !serviceFilter || c.agenda_id === agendaId; // agendaId is already filtered in fetchCitas
+
+            return matchesSearch && matchesDateStart && matchesDateEnd && matchesStatus;
+        }).sort((a, b) => {
+            const dateA = new Date(`${a.fecha}T${a.hora}`);
+            const dateB = new Date(`${b.fecha}T${b.hora}`);
+            return dateA - dateB; // Chronological order
+        });
+
+        return (
+            <div className="general-view-container" style={{ marginTop: '20px' }}>
+                <div className="excel-filters" style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '15px',
+                    marginBottom: '20px',
+                    padding: '20px',
+                    background: 'var(--glass-bg)',
+                    borderRadius: '12px',
+                    border: '1px solid var(--glass-border)'
+                }}>
+                    <div className="filter-group">
+                        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '5px', color: 'var(--text-muted)' }}>🔍 Buscar (Nombre, CC, WhatsApp)</label>
+                        <input
+                            type="text"
+                            className="custom-file-input"
+                            placeholder="Ej: Juan Perez / 12345 / 310..."
+                            value={filterSearch}
+                            onChange={(e) => setFilterSearch(e.target.value)}
+                            style={{ width: '100%' }}
+                        />
+                    </div>
+                    <div className="filter-group">
+                        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '5px', color: 'var(--text-muted)' }}>📅 Fecha Desde</label>
+                        <input
+                            type="date"
+                            className="custom-file-input"
+                            value={filterDateStart}
+                            onChange={(e) => setFilterDateStart(e.target.value)}
+                            style={{ width: '100%' }}
+                        />
+                    </div>
+                    <div className="filter-group">
+                        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '5px', color: 'var(--text-muted)' }}>📅 Fecha Hasta</label>
+                        <input
+                            type="date"
+                            className="custom-file-input"
+                            value={filterDateEnd}
+                            onChange={(e) => setFilterDateEnd(e.target.value)}
+                            style={{ width: '100%' }}
+                        />
+                    </div>
+                    <div className="filter-group">
+                        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '5px', color: 'var(--text-muted)' }}>📊 Estado</label>
+                        <select
+                            className="custom-file-input"
+                            value={filterStatus}
+                            onChange={(e) => setFilterStatus(e.target.value)}
+                            style={{ width: '100%' }}
+                        >
+                            <option value="">Todos los estados</option>
+                            <option value="Pendiente">⏳ Pendiente</option>
+                            <option value="Confirmada">✅ Confirmada</option>
+                            <option value="Cancelada">❌ Cancelada</option>
+                            <option value="Asistió">🏥 Asistió</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="table-responsive" style={{ overflowX: 'auto', background: 'var(--glass-bg)', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                        <thead>
+                            <tr style={{ background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid var(--glass-border)' }}>
+                                <th style={{ padding: '12px', textAlign: 'left' }}>Fecha</th>
+                                <th style={{ padding: '12px', textAlign: 'left' }}>Hora</th>
+                                <th style={{ padding: '12px', textAlign: 'left' }}>Paciente</th>
+                                <th style={{ padding: '12px', textAlign: 'left' }}>Documento</th>
+                                <th style={{ padding: '12px', textAlign: 'left' }}>WhatsApp</th>
+                                <th style={{ padding: '12px', textAlign: 'left' }}>Servicio</th>
+                                <th style={{ padding: '12px', textAlign: 'left' }}>Vendedor</th>
+                                <th style={{ padding: '12px', textAlign: 'center' }}>Estado</th>
+                                <th style={{ padding: '12px', textAlign: 'center' }}>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filteredCitas.length > 0 ? filteredCitas.map(c => (
+                                <tr key={c.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', transition: 'background 0.2s' }} className="table-row-hover">
+                                    <td style={{ padding: '12px' }}>{c.fecha}</td>
+                                    <td style={{ padding: '12px' }}>{c.hora}</td>
+                                    <td style={{ padding: '12px', fontWeight: 'bold' }}>{c.nombres_completos}</td>
+                                    <td style={{ padding: '12px' }}>{c.td} {c.documento}</td>
+                                    <td style={{ padding: '12px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <a href={`https://wa.me/${c.celular?.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                🟢 {c.celular}
+                                            </a>
+                                            <button
+                                                onClick={() => {
+                                                    let num = c.celular;
+                                                    if (num && !num.startsWith('+')) num = '+' + num;
+                                                    setShowVoiceCall(num);
+                                                }}
+                                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', padding: '0' }}
+                                                title="Llamada Twilio"
+                                            >
+                                                📞
+                                            </button>
+                                        </div>
+
+                                    </td>
+                                    <td style={{ padding: '12px' }}>{c.tipo_servicio}</td>
+                                    <td style={{ padding: '12px' }}>{c.vendedor}</td>
+                                    <td style={{ padding: '12px', textAlign: 'center' }}>
+                                        <span className={`status-pill ${c.confirmacion.toLowerCase()}`} style={{
+                                            padding: '4px 8px',
+                                            borderRadius: '20px',
+                                            fontSize: '0.75rem',
+                                            background: c.confirmacion === 'Confirmada' ? 'rgba(16, 185, 129, 0.1)' :
+                                                c.confirmacion === 'Cancelada' ? 'rgba(239, 68, 68, 0.1)' :
+                                                    'rgba(245, 158, 11, 0.1)',
+                                            color: c.confirmacion === 'Confirmada' ? '#10b981' :
+                                                c.confirmacion === 'Cancelada' ? '#ef4444' :
+                                                    '#f59e0b',
+                                            border: `1px solid ${c.confirmacion === 'Confirmada' ? 'rgba(16, 185, 129, 0.2)' :
+                                                c.confirmacion === 'Cancelada' ? 'rgba(239, 68, 68, 0.2)' :
+                                                    'rgba(245, 158, 11, 0.2)'}`
+                                        }}>
+                                            {c.confirmacion}
+                                        </span>
+                                    </td>
+                                    <td style={{ padding: '12px', textAlign: 'center' }}>
+                                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                            <button onClick={() => onEditCita(c)} className="btn-edit-tiny" style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.1rem' }}>✏️</button>
+                                            <button onClick={() => onScheduleNext(c)} className="btn-edit-tiny" style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.1rem' }}>📅</button>
+                                            {canModify(c) && (
+                                                <button onClick={() => handleDeleteCita(c.id)} className="btn-delete-tiny" style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '1.1rem' }}>🗑️</button>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            )) : (
+                                <tr>
+                                    <td colSpan="9" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                        No se encontraron citas con los filtros aplicados.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+                <div style={{ marginTop: '15px', textAlign: 'right', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Mostrando {filteredCitas.length} registros
+                </div>
+            </div>
+        );
+    };
+
+
 
     const nav = (dir) => {
         const newDate = new Date(currentDate);
-        if (viewMode === "month") newDate.setMonth(currentDate.getMonth() + dir);
+        if (viewMode === "month" || viewMode === "general") newDate.setMonth(currentDate.getMonth() + dir);
         else if (viewMode === "week") newDate.setDate(currentDate.getDate() + (dir * 7));
         else newDate.setDate(currentDate.getDate() + dir);
         setCurrentDate(newDate);
@@ -682,6 +888,7 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
                         <button className={`view-btn ${viewMode === 'month' ? 'active' : ''}`} onClick={() => setViewMode('month')}>📅 Mes</button>
                         <button className={`view-btn ${viewMode === 'week' ? 'active' : ''}`} onClick={() => setViewMode('week')}>🗓️ Semana</button>
                         <button className={`view-btn ${viewMode === 'day' ? 'active' : ''}`} onClick={() => setViewMode('day')}>📍 Día</button>
+                        <button className={`view-btn ${viewMode === 'general' ? 'active' : ''}`} onClick={() => setViewMode('general')}>📊 General</button>
                     </div>
                 </div>
 
@@ -702,7 +909,8 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
                         <button onClick={() => nav(-1)} className="btn-nav">{"<"}</button>
                         <h2 style={{ margin: 0, minWidth: 180, textAlign: "center", fontSize: "1.1rem" }}>
                             {viewMode === "month" ? new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(currentDate).toUpperCase() :
-                                viewMode === "week" ? "Semana Actual" : "Día Seleccionado"}
+                                viewMode === "week" ? "Semana Actual" :
+                                    viewMode === "day" ? "Día Seleccionado" : "Control de Agenda (Excel)"}
                         </h2>
                         <button onClick={() => nav(1)} className="btn-nav">{">"}</button>
                     </div>
@@ -712,6 +920,7 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
             {viewMode === "month" && renderMonthView()}
             {viewMode === "week" && renderWeekView()}
             {viewMode === "day" && renderDayView()}
+            {viewMode === "general" && renderGeneralView()}
 
 
 
@@ -775,6 +984,13 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
             />
 
 
+            {showVoiceCall && (
+                <VoiceCall
+                    clinicId={user?.clinic_id || user?.id}
+                    phoneNumber={showVoiceCall}
+                    onEnd={() => setShowVoiceCall(null)}
+                />
+            )}
         </div>
 
     );
