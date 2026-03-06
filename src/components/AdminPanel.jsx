@@ -88,9 +88,10 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     ]);
     const [savingWhaticket, setSavingWhaticket] = useState(false);
 
-    // Twilio States
-    const [twilioConfig, setTwilioConfig] = useState({ account_sid: "", auth_token: "", api_key_sid: "", api_key_secret: "", twilio_number: "", twiml_app_sid: "", is_active: true });
-    const [savingTwilio, setSavingTwilio] = useState(false);
+
+    // Zadarma States
+    const [zadarmaConfig, setZadarmaConfig] = useState({ api_key: "", api_secret: "", sip_user: "", is_active: true });
+    const [savingZadarma, setSavingZadarma] = useState(false);
 
 
     // States for Modals
@@ -269,9 +270,9 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 });
             }
 
-            // --- CARGAR CONFIG TWILIO ---
-            const { data: tConfig } = await supabase.from('twilio_configs').select('*').eq('clinic_id', currentClinicId).maybeSingle();
-            if (tConfig) setTwilioConfig(tConfig);
+            // --- CARGAR CONFIG ZADARMA ---
+            const { data: zConfig } = await supabase.from('zadarma_configs').select('*').eq('clinic_id', currentClinicId).maybeSingle();
+            if (zConfig) setZadarmaConfig(zConfig);
 
             await fetchMetaData(currentClinicId);
             if (currentClinicId) fetchWhaticketConnections(currentClinicId);
@@ -1585,31 +1586,31 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         }
     };
 
-    const handleSaveTwilio = async (e) => {
+    const handleSaveZadarma = async (e) => {
         e.preventDefault();
-        setSavingTwilio(true);
+        setSavingZadarma(true);
         try {
             const { data: { user: authUser } } = await supabase.auth.getUser();
             if (!authUser) return;
 
             const configToSave = {
                 clinic_id: clinicId || authUser.id,
-                ...twilioConfig
+                ...zadarmaConfig
             };
             delete configToSave.id;
             delete configToSave.created_at;
             delete configToSave.updated_at;
 
-            const { error: cfgError } = await supabase.from('twilio_configs').upsert(configToSave, { onConflict: 'clinic_id' });
+            const { error: cfgError } = await supabase.from('zadarma_configs').upsert(configToSave, { onConflict: 'clinic_id' });
             if (cfgError) throw cfgError;
 
-            alert("✅ Configuración de Twilio guardada correctamente.");
+            alert("✅ Configuración de Zadarma guardada correctamente.");
             fetchData();
         } catch (error) {
             console.error(error);
-            alert("❌ Error al guardar Twilio: " + error.message);
+            alert("❌ Error al guardar Zadarma: " + error.message);
         } finally {
-            setSavingTwilio(false);
+            setSavingZadarma(false);
         }
     };
 
@@ -1829,111 +1830,85 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         </div>
     );
 
-    const renderTwilio = () => {
-        return (
-            <div className="admin-section fade-in">
-                <div className="section-header">
-                    <h3>📞 Configuración de Twilio Voice</h3>
-                    <p className="text-muted">Integra llamadas telefónicas directamente desde el CRM.</p>
-                </div>
 
-                <div className="premium-card">
-                    <form onSubmit={handleSaveTwilio} className="premium-form-v">
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                            <div className="form-group">
-                                <label>Twilio Account SID</label>
-                                <input
-                                    type="text"
-                                    value={twilioConfig.account_sid}
-                                    onChange={e => setTwilioConfig({ ...twilioConfig, account_sid: e.target.value })}
-                                    required
-                                    placeholder="ACxxxxxxxx..."
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label>Twilio Auth Token</label>
-                                <input
-                                    type="password"
-                                    value={twilioConfig.auth_token}
-                                    onChange={e => setTwilioConfig({ ...twilioConfig, auth_token: e.target.value })}
-                                    placeholder="Solo si no usas API Key"
-                                />
-                            </div>
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                            <div className="form-group">
-                                <label>API Key SID (Recomendado)</label>
-                                <input
-                                    type="text"
-                                    value={twilioConfig.api_key_sid}
-                                    onChange={e => setTwilioConfig({ ...twilioConfig, api_key_sid: e.target.value })}
-                                    placeholder="SKxxxxxxxx..."
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label>API Key Secret</label>
-                                <input
-                                    type="password"
-                                    value={twilioConfig.api_key_secret}
-                                    onChange={e => setTwilioConfig({ ...twilioConfig, api_key_secret: e.target.value })}
-                                    placeholder="Secret para generar Access Tokens"
-                                />
-                            </div>
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                            <div className="form-group">
-                                <label>Número de Twilio (Caller ID)</label>
-                                <input
-                                    type="text"
-                                    value={twilioConfig.twilio_number}
-                                    onChange={e => setTwilioConfig({ ...twilioConfig, twilio_number: e.target.value })}
-                                    placeholder="+1xxxxxxxxxx"
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label>TwiML App SID</label>
-                                <input
-                                    type="text"
-                                    value={twilioConfig.twiml_app_sid}
-                                    onChange={e => setTwilioConfig({ ...twilioConfig, twiml_app_sid: e.target.value })}
-                                    placeholder="APxxxxxxxx..."
-                                />
-                            </div>
-                        </div>
-
-                        <div className="form-group" style={{ marginBottom: '20px' }}>
-                            <label className="checkbox-item" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <input
-                                    type="checkbox"
-                                    checked={twilioConfig.is_active}
-                                    onChange={e => setTwilioConfig({ ...twilioConfig, is_active: e.target.checked })}
-                                />
-                                <span style={{ fontSize: '0.9rem' }}>Servicio de Llamadas Activo</span>
-                            </label>
-                        </div>
-
-                        <button type="submit" className="btn-process" disabled={savingTwilio}>
-                            {savingTwilio ? "Guardando..." : "💾 Guardar Configuración de Twilio"}
-                        </button>
-                    </form>
-                </div>
-
-                <div className="premium-card" style={{ marginTop: '20px', border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb), 0.05)' }}>
-                    <h4 style={{ color: 'var(--accent)' }}>💡 Instrucciones para Llamadas con Navegador</h4>
-                    <p style={{ fontSize: '0.85rem', lineHeight: '1.6' }}>
-                        1. Crea una <strong>TwiML App</strong> en tu consola de Twilio.<br />
-                        2. Configura la <strong>Voice URL</strong> de la TwiML App apuntando a la Edge Function: <br />
-                        <code style={{ background: '#000', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
-                            {import.meta.env.VITE_SUPABASE_URL}/functions/v1/twilio-voice
-                        </code><br />
-                        3. Genera un <strong>API Key</strong> y <strong>Secret</strong> para mayor seguridad en la generación de tokens.
-                    </p>
+    const renderZadarma = () => (
+        <div className="admin-section fade-in">
+            <div className="section-header">
+                <div>
+                    <h3>📞 Configuración de Zadarma (WebRTC)</h3>
+                    <p className="text-muted">Integra Zadarma para realizar llamadas directamente desde el navegador usando WebRTC.</p>
                 </div>
             </div>
-        );
-    };
+
+            <div className="premium-card">
+                <form onSubmit={handleSaveZadarma} className="premium-form-v">
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                        <div className="form-group">
+                            <label>Zadarma API Key</label>
+                            <input
+                                type="text"
+                                value={zadarmaConfig.api_key}
+                                onChange={e => setZadarmaConfig({ ...zadarmaConfig, api_key: e.target.value })}
+                                placeholder="Key de 20 caracteres"
+                                required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Zadarma API Secret</label>
+                            <input
+                                type="password"
+                                value={zadarmaConfig.api_secret}
+                                onChange={e => setZadarmaConfig({ ...zadarmaConfig, api_secret: e.target.value })}
+                                placeholder="Secret de 20 caracteres"
+                                required
+                            />
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                        <div className="form-group">
+                            <label>SIP User (ID de Usuario)</label>
+                            <input
+                                type="text"
+                                value={zadarmaConfig.sip_user}
+                                onChange={e => setZadarmaConfig({ ...zadarmaConfig, sip_user: e.target.value })}
+                                placeholder="Ej: 123456"
+                                required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Estado del Servicio</label>
+                            <select
+                                value={zadarmaConfig.is_active}
+                                onChange={e => setZadarmaConfig({ ...zadarmaConfig, is_active: e.target.value === "true" })}
+                            >
+                                <option value="true">Activo</option>
+                                <option value="false">Inactivo</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                        Asegúrate de tener habilitado WebRTC en tu panel de Zadarma (Configuración → Ajustes de SIP).
+                    </p>
+
+                    <button type="submit" className="btn-process" disabled={savingZadarma}>
+                        {savingZadarma ? "Guardando..." : "💾 Guardar Configuración de Zadarma"}
+                    </button>
+                </form>
+            </div>
+
+            <div className="premium-card" style={{ marginTop: '20px', border: '1px solid var(--primary)', background: 'rgba(var(--primary-rgb), 0.05)' }}>
+                <h4 style={{ color: 'var(--primary)' }}>💡 Cómo configurar Zadarma</h4>
+                <p style={{ fontSize: '0.85rem', lineHeight: '1.6' }}>
+                    1. Ve a tu panel de Zadarma → <strong>Configuración → API</strong>.<br />
+                    2. Solicita o copia tu <strong>Key</strong> y <strong>Secret</strong>.<br />
+                    3. Verifica que tu <strong>SIP User</strong> esté activo y configurado con WebRTC habilitado.<br />
+                    4. Una vez guardado, el CRM usará automáticamente Zadarma para las llamadas salientes.
+                </p>
+            </div>
+        </div>
+    );
 
     const renderEmail = () => (
 
@@ -3351,7 +3326,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <button className={activeView === "whatsapp" ? "active" : ""} onClick={() => setActiveView("whatsapp")}>💬 <span className="sidebar-text">WhatsApp (Whaticket)</span></button>
                                     <button className={activeView === "ai_agent" ? "active" : ""} onClick={() => setActiveView("ai_agent")}>🤖 <span className="sidebar-text">Agente IA</span></button>
                                     <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
-                                    <button className={activeView === "twilio" ? "active" : ""} onClick={() => setActiveView("twilio")}>📞 <span className="sidebar-text">Twilio Llamadas</span></button>
+                                    <button className={activeView === "zadarma" ? "active" : ""} onClick={() => setActiveView("zadarma")}>☎️ <span className="sidebar-text">Zadarma Llamadas</span></button>
 
                                 </>
                             )}
@@ -3376,7 +3351,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "whatsapp" && renderWhaticket()}
                     {activeView === "ai_agent" && <AiAgentSection clinicId={clinicId} />}
                     {activeView === "meta" && renderMetaConfig()}
-                    {activeView === "twilio" && renderTwilio()}
+                    {activeView === "zadarma" && renderZadarma()}
 
                     {activeView === "logs" && renderLogs()}
                     {activeView === "superconfig" && renderSuperConfig()}

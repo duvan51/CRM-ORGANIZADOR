@@ -649,7 +649,7 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
                                                     }}
                                                     className="btn-edit-tiny"
                                                     style={{ background: 'transparent', border: 'none', cursor: 'pointer', opacity: 0.8 }}
-                                                    title="Llamada Twilio"
+                                                    title="Llamada Zadarma"
                                                 >
                                                     📞
                                                 </button>

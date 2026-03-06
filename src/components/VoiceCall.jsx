@@ -1,99 +1,126 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Device } from '@twilio/voice-sdk';
 import { supabase } from '../supabase';
 
 const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
-    const [device, setDevice] = useState(null);
-    const [call, setCall] = useState(null);
     const [status, setStatus] = useState('initializing'); // initializing, ready, calling, active, ended, error
+    const [errorMessage, setErrorMessage] = useState('');
     const [duration, setDuration] = useState(0);
     const timerRef = useRef(null);
 
     useEffect(() => {
-        setupDevice();
+        setupZadarma();
+
         return () => {
-            if (device) {
-                console.log("Destroying Twilio device...");
-                device.destroy();
-            }
             if (timerRef.current) clearInterval(timerRef.current);
+            // Zadarma clean up if needed
         };
     }, []);
 
-    const setupDevice = async () => {
+    const setupZadarma = async () => {
         try {
-            console.log("Fetching Twilio token for clinic:", clinicId);
-            const { data, error } = await supabase.functions.invoke('twilio-token', {
+            console.log("Setting up Zadarma for clinic:", clinicId);
+            const { data, error } = await supabase.functions.invoke('zadarma-token', {
                 body: { clinicId }
             });
 
             if (error) throw error;
-            if (!data.token) throw new Error("No token received");
+            if (!data.key) throw new Error("No Zadarma key received");
 
-            const newDevice = new Device(data.token, {
-                codecPreferences: ['opus', 'pcmu'],
-                fakeLocalAudio: true,
-                enableIceRestart: true,
-            });
-
-            newDevice.on('registered', () => {
-                setStatus('ready');
-                console.log('Twilio Device registered');
-            });
-
-            newDevice.on('error', (err) => {
-                console.error('Twilio Device Error:', err);
-                setStatus('error');
-            });
-
-            await newDevice.register();
-            setDevice(newDevice);
+            // Load Zadarma script
+            if (!window.Zadarma) {
+                const script = document.createElement('script');
+                script.src = "https://my.zadarma.com/webrtc/widget.js";
+                script.async = true;
+                script.onload = () => initializeZadarmaWidget(data.key);
+                document.body.appendChild(script);
+            } else {
+                initializeZadarmaWidget(data.key);
+            }
         } catch (err) {
-            console.error('Error setting up Twilio device:', err);
+            console.error('Error setting up Zadarma:', err);
             setStatus('error');
+            setErrorMessage(err.message || "Error al configurar Zadarma");
         }
     };
 
-    const handleCall = async () => {
-        if (!device || !phoneNumber) return;
+    const initializeZadarmaWidget = (key) => {
+        if (!window.Zadarma) return;
 
-        try {
-            const params = {
-                To: phoneNumber,
-                number: phoneNumber,
-            };
+        console.log("Initializing Zadarma with key:", key);
 
-            console.log("Initiating call to:", phoneNumber);
-            const newCall = await device.connect({ params });
-            setCall(newCall);
-            setStatus('calling');
-
-            newCall.on('accept', () => {
-                console.log("Call accepted");
+        // Standard Zadarma WebRTC config object
+        window.zadarmaConfig = {
+            key: key,
+            onReady: () => {
+                console.log("Zadarma WebRTC Ready");
+                setStatus('ready');
+            },
+            onCallStart: () => {
+                console.log("Zadarma Call Started");
                 setStatus('active');
                 startTimer();
-            });
-
-            newCall.on('disconnect', () => {
-                console.log("Call disconnected");
+            },
+            onCallEnd: () => {
+                console.log("Zadarma Call Ended");
                 handleEnd();
-            });
+            },
+            onError: (err) => {
+                console.error("Zadarma WebRTC Error:", err);
+                if (status === 'initializing') {
+                    setStatus('error');
+                    setErrorMessage("Error de conexión con Zadarma");
+                }
+            }
+        };
 
-            newCall.on('reject', () => {
-                console.log("Call rejected");
-                handleEnd();
-            });
+        // Initialize Zadarma
+        try {
+            if (window.Zadarma.prepare) {
+                window.Zadarma.prepare(window.zadarmaConfig);
+            } else if (window.Zadarma.init) {
+                window.Zadarma.init(window.zadarmaConfig);
+            }
+        } catch (e) {
+            console.error("Fail to init Zadarma:", e);
+        }
+
+        // Fallback if onReady is not called
+        setTimeout(() => {
+            if (status === 'initializing') {
+                console.log("Forcing ready status (timeout)");
+                setStatus('ready');
+            }
+        }, 5000);
+    };
+
+    const handleCall = () => {
+        if (!window.Zadarma || !phoneNumber) return;
+
+        try {
+            const cleanNumber = phoneNumber.replace(/\s+/g, '').replace(/[()]/g, '');
+            console.log("Initiating Zadarma call to:", cleanNumber);
+
+            if (window.Zadarma.call) {
+                window.Zadarma.call(cleanNumber);
+                setStatus('calling');
+            } else if (window.Zadarma.makeCall) {
+                window.Zadarma.makeCall(cleanNumber);
+                setStatus('calling');
+            } else {
+                throw new Error("Método de llamada no encontrado en el SDK");
+            }
         } catch (err) {
-            console.error("Error connecting call:", err);
+            console.error("Error making Zadarma call:", err);
             setStatus('error');
+            setErrorMessage(err.message);
         }
     };
 
     const handleEnd = () => {
-        if (call) {
-            call.disconnect();
-            setCall(null);
+        if (window.Zadarma && window.Zadarma.hangup) {
+            window.Zadarma.hangup();
         }
+
         setStatus('ended');
         if (timerRef.current) clearInterval(timerRef.current);
         if (onEnd) setTimeout(onEnd, 2000);
@@ -117,9 +144,10 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
         <div className="voice-call-overlay" onClick={(e) => status === 'ready' || status === 'error' || status === 'ended' ? onEnd() : null}>
             <div className="voice-call-card" onClick={e => e.stopPropagation()}>
                 <div className="call-avatar">
-                    {phoneNumber ? phoneNumber.replace(/\+/g, '').charAt(0) : '📞'}
+                    {phoneNumber ? phoneNumber.replace(/\+/g, '').charAt(0) : '☎️'}
                 </div>
                 <h3 style={{ margin: '0 0 10px 0', color: 'var(--text-main)' }}>{phoneNumber || "Número desconocido"}</h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '10px' }}>Proveedor: ZADARMA</p>
 
                 <p className={`status-text ${status}`} style={{
                     fontWeight: 'bold',
@@ -131,7 +159,11 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
                     {status === 'calling' && "Llamando..."}
                     {status === 'active' && `En llamada: ${formatDuration(duration)}`}
                     {status === 'ended' && "Llamada finalizada"}
-                    {status === 'error' && "Error de configuración"}
+                    {status === 'error' && (
+                        <div style={{ color: '#f87171', fontSize: '0.85rem', marginTop: '10px' }}>
+                            Error: {errorMessage || "de configuración"}
+                        </div>
+                    )}
                 </p>
 
                 <div className="call-actions" style={{ display: 'flex', justifyContent: 'center', gap: '20px' }}>

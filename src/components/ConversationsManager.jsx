@@ -443,7 +443,7 @@ const ConversationsManager = ({ clinicId }) => {
                                                     gap: '4px'
                                                 }}
                                             >
-                                                📞 Llamar
+                                                ☎️ Zadarma
                                             </button>
                                         )}
                                     </div>
