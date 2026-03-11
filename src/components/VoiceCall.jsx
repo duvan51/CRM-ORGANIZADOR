@@ -21,9 +21,26 @@ const VoiceCall = ({ clinicId, phoneNumber, onClose }) => {
     }, []);
 
     const setupZadarma = async () => {
+        // --- 1. Definir Escuchadores ANTES de iniciar nada para capturar eventos V9 ---
+        window.zadarmaOnStatus = (zadarmaStatus) => {
+            console.log("☎️ Zadarma Status:", zadarmaStatus);
+            if (zadarmaStatus === 'calling') setStatus('calling');
+            if (zadarmaStatus === 'accepted') {
+                setStatus('active');
+                startTimer();
+            }
+            if (zadarmaStatus === 'terminated') {
+                setStatus('ended');
+                if (timerRef.current) clearInterval(timerRef.current);
+            }
+        };
+
+        window.zadarmaOnEvent = (event) => {
+            console.log("📢 Zadarma Event:", event);
+        };
+
         try {
             console.log("Setting up Zadarma for clinic:", clinicId);
-
             const { data, error } = await supabase.functions.invoke('zadarma-token', {
                 body: { clinicId }
             });
@@ -34,7 +51,6 @@ const VoiceCall = ({ clinicId, phoneNumber, onClose }) => {
             console.log("Zadarma auth success. Launching widget...");
 
             const initWidget = (attempts = 0) => {
-                // Verificar que AMBAS partes de la librería de Zadarma estén listas
                 if (window.zadarmaWidgetFn && window.zdrmWebrtcPhoneInterface) {
                     // Limpiar vestigios si los hay para evitar duplicados
                     const oldWidget = document.getElementById('zadarma-webrtc-widget') || document.querySelector('.zadarma-webrtc-widget');
@@ -55,80 +71,17 @@ const VoiceCall = ({ clinicId, phoneNumber, onClose }) => {
                 } else {
                     console.error("Zadarma timeout: zdrmWebrtcPhoneInterface not found");
                     setStatus('error');
+                    setErrorMessage("Tiempo de espera agotado al cargar el teléfono");
                 }
             };
             initWidget();
         } catch (err) {
-            console.error('Error completo de Zadarma:', err);
-            let msg = err.message || "Error al configurar Zadarma";
-
-            if (err.context && typeof err.context.json === 'function') {
-                err.context.json().then(data => {
-                    console.log("Cuerpo del error (JSON):", data);
-                    setErrorMessage(data.error || data.details || msg);
-                }).catch(() => {
-                    setErrorMessage(msg);
-                });
-            } else {
-                if (err.context?.json) {
-                    msg = err.context.json.error || err.context.json.details || msg;
-                    console.log("Cuerpo del error (JSON):", err.context.json);
-                }
-                setErrorMessage(msg);
-            }
+            console.error('Error completo de Zadarma:', err.message);
+            setErrorMessage(err.message || "Error al configurar Zadarma");
             setStatus('error');
         }
     };
 
-    const initializeZadarmaWidget = (key) => {
-        if (!window.Zadarma) return;
-
-        console.log("Initializing Zadarma with key:", key);
-
-        // Standard Zadarma WebRTC config object
-        window.zadarmaConfig = {
-            key: key,
-            onReady: () => {
-                console.log("Zadarma WebRTC Ready");
-                setStatus('ready');
-            },
-            onCallStart: () => {
-                console.log("Zadarma Call Started");
-                setStatus('active');
-                startTimer();
-            },
-            onCallEnd: () => {
-                console.log("Zadarma Call Ended");
-                handleEnd();
-            },
-            onError: (err) => {
-                console.error("Zadarma WebRTC Error:", err);
-                if (status === 'initializing') {
-                    setStatus('error');
-                    setErrorMessage("Error de conexión con Zadarma");
-                }
-            }
-        };
-
-        // Initialize Zadarma
-        try {
-            if (window.Zadarma.prepare) {
-                window.Zadarma.prepare(window.zadarmaConfig);
-            } else if (window.Zadarma.init) {
-                window.Zadarma.init(window.zadarmaConfig);
-            }
-        } catch (e) {
-            console.error("Fail to init Zadarma:", e);
-        }
-
-        // Fallback if onReady is not called
-        setTimeout(() => {
-            if (status === 'initializing') {
-                console.log("Forcing ready status (timeout)");
-                setStatus('ready');
-            }
-        }, 5000);
-    };
 
     const handleCall = () => {
         if (!window.Zadarma || !phoneNumber) return;
@@ -203,7 +156,7 @@ const VoiceCall = ({ clinicId, phoneNumber, onClose }) => {
 
                 <div className={`status-text ${status}`} style={{
                     fontWeight: 'bold',
-                    marginBottom: '30px',
+                    marginBottom: '10px',
                     color: status === 'active' ? '#4ade80' : status === 'calling' ? 'var(--accent)' : status === 'error' ? '#f87171' : 'var(--text-muted)'
                 }}>
                     {status === 'initializing' && "Iniciando dispositivo..."}
@@ -216,6 +169,60 @@ const VoiceCall = ({ clinicId, phoneNumber, onClose }) => {
                             Error: {errorMessage || "de configuración"}
                         </div>
                     )}
+                </div>
+
+                {/* Indicadores de Hardware y Seguridad */}
+                <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    marginBottom: '20px',
+                    fontSize: '0.8rem',
+                    padding: '15px',
+                    background: 'rgba(0,0,0,0.05)',
+                    borderRadius: '12px',
+                    textAlign: 'left'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: window.isSecureContext ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
+                        <span>Entorno Seguro:</span>
+                        <span>{window.isSecureContext ? '✓ SÍ (OK)' : '✗ NO (BLOQUEADO)'}</span>
+                    </div>
+
+                    {!window.isSecureContext && (
+                        <p style={{ margin: '5px 0 0 0', fontSize: '0.7rem', color: '#f87171', lineHeight: '1.2' }}>
+                            ⚠️ El micrófono NO FUNCIONARÁ. Zadarma requiere que uses <strong>HTTPS</strong> o <strong>localhost</strong>.
+                        </p>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: window.zdrmWebrtcPhoneInterface ? '#4ade80' : '#f87171' }}>
+                        <span>Librería Voz:</span>
+                        <span>{window.zdrmWebrtcPhoneInterface ? '✓ LISTA' : '✗ CARGANDO...'}</span>
+                    </div>
+
+                    <button
+                        onClick={async () => {
+                            try {
+                                if (!navigator.mediaDevices) throw new Error("Acceso a dispositivos de audio bloqueado por el navegador (Requiere HTTPS)");
+                                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                                alert("✅ ¡Micrófono detectado correctamente!");
+                                stream.getTracks().forEach(track => track.stop());
+                            } catch (e) {
+                                alert("❌ Error de micrófono: " + e.message + "\n\nVerifica que el sitio sea HTTPS y que hayas dado permisos.");
+                            }
+                        }}
+                        style={{
+                            marginTop: '10px',
+                            padding: '8px',
+                            background: '#6366f1',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontSize: '0.7rem',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        🎤 Probar Micrófono del Navegador
+                    </button>
                 </div>
 
                 <div className="call-actions" style={{ display: 'flex', justifyContent: 'center', gap: '20px' }}>
