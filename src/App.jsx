@@ -18,6 +18,7 @@ import SubscriptionManager from "./components/SubscriptionManager.jsx";
 import QuickScheduleModal from "./components/QuickScheduleModal.jsx";
 import ResetPasswordForm from "./components/ResetPasswordForm.jsx";
 import MasterPanel from "./components/MasterPanel.jsx";
+import VoiceCall from "./components/VoiceCall.jsx";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div className="field-manager-container">
     <h4 className="field-manager-title">Columnas a unificar:</h4>
@@ -64,6 +65,7 @@ function App() {
   const [unificar, setUnificar] = useState(true);
   const [dedupCols, setDedupCols] = useState([]);
   const [result, setResult] = useState(null);
+  const [showVoiceCall, setShowVoiceCall] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [error, setError] = useState(null);
   const [step, setStep] = useState(1);
@@ -154,6 +156,15 @@ function App() {
         console.log("Evento no manejado:", message.type);
     }
   });
+
+  useEffect(() => {
+    const handleStartTestCall = (e) => {
+      const { number } = e.detail;
+      setShowVoiceCall(number);
+    };
+    window.addEventListener('startTestCall', handleStartTestCall);
+    return () => window.removeEventListener('startTestCall', handleStartTestCall);
+  }, []);
 
 
   const fetchUserProfile = async () => {
@@ -790,6 +801,22 @@ function App() {
             setSelectedDate(new Date(y, m - 1, d));
             setPendingReschedule(null);
           }}
+        />
+      )}
+
+      {showVoiceCall && (
+        <VoiceCall
+          phoneNumber={showVoiceCall}
+          clinicId={user.clinic_id || user.id}
+          onClose={() => setShowVoiceCall(null)}
+        />
+      )}
+
+      {showVoiceCall && (
+        <VoiceCall
+          phoneNumber={showVoiceCall}
+          clinicId={user.clinic_id || user.id}
+          onClose={() => setShowVoiceCall(null)}
         />
       )}
     </div>

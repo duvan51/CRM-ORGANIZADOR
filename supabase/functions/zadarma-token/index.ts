@@ -9,7 +9,8 @@ const corsHeaders = {
 // Helper to calculate MD5 and SHA1 HMAC for Zadarma
 async function getMd5(text: string): Promise<string> {
     const data = new TextEncoder().encode(text);
-    const hashBuffer = await crypto.subtle.digest("MD5", data);
+    // En Deno, SubtleCrypto a veces no tiene MD5, usamos un fallback manual si es necesario
+    const hashBuffer = await crypto.subtle.digest("MD5" as any, data);
     return Array.from(new Uint8Array(hashBuffer))
         .map(b => b.toString(16).padStart(2, "0"))
         .join("");
@@ -29,7 +30,14 @@ async function getHmacSha1(key: string, data: string): Promise<string> {
     );
 
     const signature = await crypto.subtle.sign("HMAC", cryptoKey, dataToSign);
-    return btoa(String.fromCharCode(...new Uint8Array(signature)));
+
+    // IMPORTANTE: Zadarma requiere Base64 puro
+    const uint8Array = new Uint8Array(signature);
+    let binary = '';
+    for (let i = 0; i < uint8Array.byteLength; i++) {
+        binary += String.fromCharCode(uint8Array[i]);
+    }
+    return btoa(binary);
 }
 
 Deno.serve(async (req: Request) => {
@@ -46,7 +54,7 @@ Deno.serve(async (req: Request) => {
         // Validate headers
         const authHeader = req.headers.get('Authorization');
         if (!authHeader) {
-            console.error("Missing Authorization header");
+            console.error("Missing Authorization header in request");
             return new Response(JSON.stringify({ error: "No se proporcionó token de autorización" }), { status: 401, headers: corsHeaders });
         }
 
@@ -56,9 +64,13 @@ Deno.serve(async (req: Request) => {
 
         // Get user session
         const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
+
         if (authError || !user) {
-            console.error("Auth error:", authError);
-            return new Response(JSON.stringify({ error: "No autorizado o sesión expirada" }), { status: 401, headers: corsHeaders });
+            console.error("Auth validation failed:", authError?.message || "User not found");
+            return new Response(JSON.stringify({
+                error: "Sesión inválida o expirada. Por favor, cierra sesión y vuelve a entrar.",
+                details: authError?.message
+            }), { status: 401, headers: corsHeaders });
         }
 
         // Parse body
@@ -85,52 +97,58 @@ Deno.serve(async (req: Request) => {
 
         if (!config) {
             console.warn(`Zadarma not configured for clinic ${clinicId}`);
-            return new Response(JSON.stringify({ error: "Zadarma no está configurado para esta clínica" }), { status: 404, headers: corsHeaders });
+            return new Response(JSON.stringify({
+                error: "Zadarma no está configurado",
+                details: `No se encontró configuración para clinicId: ${clinicId}. Por favor, guarda la configuración en el Admin Panel de nuevo.`
+            }), { status: 400, headers: corsHeaders });
         }
 
-        // Zadarma API call: GET /v1/webrtc/get_key/
-        const apiPath = "/v1/webrtc/get_key/";
-        const sortedParams = ""; // No params for this specific call
+        // Zadarma API call: GET /v1/webrtc/get_key
+        const apiKey = config.api_key.trim();
+        const apiSecret = config.api_secret.trim();
+
+        const apiPath = "/v1/webrtc/get_key"; // Eliminado el slash final según documentación
+        const sortedParams = "";
         const md5Params = await getMd5(sortedParams);
         const dataToSign = apiPath + sortedParams + md5Params;
-        const signature = await getHmacSha1(config.api_secret, dataToSign);
+
+        console.log(`DEBUG: Signing string: "${dataToSign}"`);
+        const signature = await getHmacSha1(apiSecret, dataToSign);
 
         const zadarmaUrl = `https://api.zadarma.com${apiPath}`;
-        console.log("Calling Zadarma API...");
+        console.log(`Calling Zadarma API: ${zadarmaUrl}`);
 
         const response = await fetch(zadarmaUrl, {
             method: 'GET',
             headers: {
-                'Authorization': `${config.api_key}:${signature}`
+                'Authorization': `${apiKey}:${signature}`
             }
         });
 
         if (!response.ok) {
             const rawError = await response.text();
-            console.error("Zadarma API HTTP Error:", response.status, rawError);
-            throw new Error(`Zadarma API respondió con error ${response.status}`);
+            console.error("Zadarma API Error Response:", rawError);
+            throw new Error(`Zadarma API error (${response.status}): ${rawError}`);
         }
 
         const data = await response.json();
-        console.log("Zadarma response received:", data.status);
-
         if (data.status === 'error') {
-            console.error("Zadarma API Business Error:", data.message);
-            throw new Error(data.message || "Error devuelto por la API de Zadarma");
+            throw new Error(`Zadarma Business Error: ${data.message || 'Unknown error'}`);
         }
 
         return new Response(JSON.stringify({
             key: data.key,
+            sip: config.sip_user,
             status: 'success'
         }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
 
     } catch (error: any) {
-        console.error("Zadarma Edge Function Error:", error.message);
+        console.error("DEBUG - Zadarma Function Error:", error.message);
         return new Response(JSON.stringify({
             error: error.message,
-            hint: "Verifica las credenciales de Zadarma en el Panel de Admin."
+            hint: "Verifica que el API Key y Secret en el Panel de Admin sean correctos."
         }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 400,

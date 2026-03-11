@@ -92,6 +92,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     // Zadarma States
     const [zadarmaConfig, setZadarmaConfig] = useState({ api_key: "", api_secret: "", sip_user: "", is_active: true });
     const [savingZadarma, setSavingZadarma] = useState(false);
+    const [testPhone, setTestPhone] = useState("");
+    const [showZadarmaSecret, setShowZadarmaSecret] = useState(false);
 
 
     // States for Modals
@@ -1855,13 +1857,33 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         </div>
                         <div className="form-group">
                             <label>Zadarma API Secret</label>
-                            <input
-                                type="password"
-                                value={zadarmaConfig.api_secret}
-                                onChange={e => setZadarmaConfig({ ...zadarmaConfig, api_secret: e.target.value })}
-                                placeholder="Secret de 20 caracteres"
-                                required
-                            />
+                            <div style={{ position: 'relative' }}>
+                                <input
+                                    type={showZadarmaSecret ? "text" : "password"}
+                                    value={zadarmaConfig.api_secret}
+                                    onChange={e => setZadarmaConfig({ ...zadarmaConfig, api_secret: e.target.value })}
+                                    placeholder="Secret de 20 caracteres"
+                                    required
+                                    style={{ paddingRight: '40px' }}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowZadarmaSecret(!showZadarmaSecret)}
+                                    style={{
+                                        position: 'absolute',
+                                        right: '10px',
+                                        top: '50%',
+                                        transform: 'translateY(-50%)',
+                                        background: 'transparent',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontSize: '1.2rem',
+                                        padding: '0'
+                                    }}
+                                >
+                                    {showZadarmaSecret ? "👁️" : "🙈"}
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -1906,6 +1928,36 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     3. Verifica que tu <strong>SIP User</strong> esté activo y configurado con WebRTC habilitado.<br />
                     4. Una vez guardado, el CRM usará automáticamente Zadarma para las llamadas salientes.
                 </p>
+            </div>
+
+            <div className="premium-card" style={{ marginTop: '20px', border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb), 0.05)' }}>
+                <h4 style={{ color: 'var(--accent)' }}>🧪 Probar Llamada Directa</h4>
+                <p style={{ fontSize: '0.85rem', marginBottom: '15px' }}>
+                    Ingresa un número (con código de país, ej: +573...) para probar si la conexión con Zadarma es correcta.
+                </p>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                    <input
+                        type="text"
+                        value={testPhone}
+                        onChange={e => setTestPhone(e.target.value)}
+                        placeholder="+57300..."
+                        style={{ flex: 1 }}
+                    />
+                    <button
+                        className="btn-process"
+                        style={{ background: 'var(--accent)', border: 'none' }}
+                        onClick={() => {
+                            if (!testPhone) return alert("Ingresa un número");
+                            // Esto activará el componente VoiceCall que ya tienes importado o manejado en el Layout
+                            window.dispatchEvent(new CustomEvent('startTestCall', { detail: { number: testPhone, clinicId: clinicId } }));
+                        }}
+                    >
+                        📞 Iniciar Llamada de Prueba
+                    </button>
+                </div>
+                <small className="text-muted" style={{ display: 'block', marginTop: '10px' }}>
+                    Nota: Al hacer clic, se abrirá el widget de llamada en la parte inferior.
+                </small>
             </div>
         </div>
     );

@@ -19,6 +19,7 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
     const setupZadarma = async () => {
         try {
             console.log("Setting up Zadarma for clinic:", clinicId);
+
             const { data, error } = await supabase.functions.invoke('zadarma-token', {
                 body: { clinicId }
             });
@@ -26,20 +27,53 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
             if (error) throw error;
             if (!data.key) throw new Error("No Zadarma key received");
 
-            // Load Zadarma script
-            if (!window.Zadarma) {
-                const script = document.createElement('script');
-                script.src = "https://my.zadarma.com/webrtc/widget.js";
-                script.async = true;
-                script.onload = () => initializeZadarmaWidget(data.key);
-                document.body.appendChild(script);
-            } else {
-                initializeZadarmaWidget(data.key);
-            }
+            console.log("Zadarma auth success, loading v9 scripts...");
+
+            // Cargar Scripts v9 en orden
+            const scriptLib = document.createElement('script');
+            scriptLib.src = "https://my.zadarma.com/webphoneWebRTCWidget/v9/js/loader-phone-lib.js?sub_v=1";
+
+            scriptLib.onload = () => {
+                const scriptFn = document.createElement('script');
+                scriptFn.src = "https://my.zadarma.com/webphoneWebRTCWidget/v9/js/loader-phone-fn.js?sub_v=1";
+                scriptFn.onload = () => {
+                    console.log("Initializing Zadarma v9 for SIP:", data.sip);
+                    if (window.zadarmaWidgetFn) {
+                        window.zadarmaWidgetFn(
+                            data.key,
+                            data.sip,
+                            'square',
+                            'es',
+                            true,
+                            { left: '10px', bottom: '5px' }
+                        );
+                        setStatus('ready');
+                    } else {
+                        throw new Error("zadarmaWidgetFn not found");
+                    }
+                };
+                document.body.appendChild(scriptFn);
+            };
+            document.body.appendChild(scriptLib);
         } catch (err) {
-            console.error('Error setting up Zadarma:', err);
+            console.error('Error completo de Zadarma:', err);
+            let msg = err.message || "Error al configurar Zadarma";
+
+            if (err.context && typeof err.context.json === 'function') {
+                err.context.json().then(data => {
+                    console.log("Cuerpo del error (JSON):", data);
+                    setErrorMessage(data.error || data.details || msg);
+                }).catch(() => {
+                    setErrorMessage(msg);
+                });
+            } else {
+                if (err.context?.json) {
+                    msg = err.context.json.error || err.context.json.details || msg;
+                    console.log("Cuerpo del error (JSON):", err.context.json);
+                }
+                setErrorMessage(msg);
+            }
             setStatus('error');
-            setErrorMessage(err.message || "Error al configurar Zadarma");
         }
     };
 
@@ -149,7 +183,7 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
                 <h3 style={{ margin: '0 0 10px 0', color: 'var(--text-main)' }}>{phoneNumber || "Número desconocido"}</h3>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '10px' }}>Proveedor: ZADARMA</p>
 
-                <p className={`status-text ${status}`} style={{
+                <div className={`status-text ${status}`} style={{
                     fontWeight: 'bold',
                     marginBottom: '30px',
                     color: status === 'active' ? '#4ade80' : status === 'calling' ? 'var(--accent)' : status === 'error' ? '#f87171' : 'var(--text-muted)'
@@ -164,7 +198,7 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
                             Error: {errorMessage || "de configuración"}
                         </div>
                     )}
-                </p>
+                </div>
 
                 <div className="call-actions" style={{ display: 'flex', justifyContent: 'center', gap: '20px' }}>
                     {status === 'ready' && (

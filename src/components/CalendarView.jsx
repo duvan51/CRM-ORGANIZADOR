@@ -59,6 +59,15 @@ const CalendarView = ({ onDateSelect, agendaId, agendas, token, user, userRole, 
         }
     }, [agendaId]);
 
+    useEffect(() => {
+        const handleStartTestCall = (e) => {
+            const { number } = e.detail;
+            setShowVoiceCall(number);
+        };
+        window.addEventListener('startTestCall', handleStartTestCall);
+        return () => window.removeEventListener('startTestCall', handleStartTestCall);
+    }, []);
+
     // Sync filter dates with currentDate when in general mode
     useEffect(() => {
         if (viewMode === "general") {
