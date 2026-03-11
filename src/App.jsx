@@ -811,14 +811,6 @@ function App() {
           onClose={() => setShowVoiceCall(null)}
         />
       )}
-
-      {showVoiceCall && (
-        <VoiceCall
-          phoneNumber={showVoiceCall}
-          clinicId={user.clinic_id || user.id}
-          onClose={() => setShowVoiceCall(null)}
-        />
-      )}
     </div>
   );
 }

@@ -1,14 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabase';
 
-const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
+const VoiceCall = ({ clinicId, phoneNumber, onClose }) => {
     const [status, setStatus] = useState('initializing'); // initializing, ready, calling, active, ended, error
     const [errorMessage, setErrorMessage] = useState('');
     const [duration, setDuration] = useState(0);
     const timerRef = useRef(null);
+    const isInitializing = useRef(false);
 
     useEffect(() => {
-        setupZadarma();
+        if (!isInitializing.current) {
+            isInitializing.current = true;
+            setupZadarma();
+        }
 
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
@@ -27,34 +31,33 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
             if (error) throw error;
             if (!data.key) throw new Error("No Zadarma key received");
 
-            console.log("Zadarma auth success, loading v9 scripts...");
+            console.log("Zadarma auth success. Launching widget...");
 
-            // Cargar Scripts v9 en orden
-            const scriptLib = document.createElement('script');
-            scriptLib.src = "https://my.zadarma.com/webphoneWebRTCWidget/v9/js/loader-phone-lib.js?sub_v=1";
+            const initWidget = (attempts = 0) => {
+                // Verificar que AMBAS partes de la librería de Zadarma estén listas
+                if (window.zadarmaWidgetFn && window.zdrmWebrtcPhoneInterface) {
+                    // Limpiar vestigios si los hay para evitar duplicados
+                    const oldWidget = document.getElementById('zadarma-webrtc-widget') || document.querySelector('.zadarma-webrtc-widget');
+                    if (oldWidget) oldWidget.remove();
 
-            scriptLib.onload = () => {
-                const scriptFn = document.createElement('script');
-                scriptFn.src = "https://my.zadarma.com/webphoneWebRTCWidget/v9/js/loader-phone-fn.js?sub_v=1";
-                scriptFn.onload = () => {
                     console.log("Initializing Zadarma v9 for SIP:", data.sip);
-                    if (window.zadarmaWidgetFn) {
-                        window.zadarmaWidgetFn(
-                            data.key,
-                            data.sip,
-                            'square',
-                            'es',
-                            true,
-                            { left: '10px', bottom: '5px' }
-                        );
-                        setStatus('ready');
-                    } else {
-                        throw new Error("zadarmaWidgetFn not found");
-                    }
-                };
-                document.body.appendChild(scriptFn);
+                    window.zadarmaWidgetFn(
+                        data.key,
+                        data.sip,
+                        'square',
+                        'es',
+                        true,
+                        { right: '25px', bottom: '25px' }
+                    );
+                    setStatus('ready');
+                } else if (attempts < 30) {
+                    setTimeout(() => initWidget(attempts + 1), 250);
+                } else {
+                    console.error("Zadarma timeout: zdrmWebrtcPhoneInterface not found");
+                    setStatus('error');
+                }
             };
-            document.body.appendChild(scriptLib);
+            initWidget();
         } catch (err) {
             console.error('Error completo de Zadarma:', err);
             let msg = err.message || "Error al configurar Zadarma";
@@ -157,7 +160,7 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
 
         setStatus('ended');
         if (timerRef.current) clearInterval(timerRef.current);
-        if (onEnd) setTimeout(onEnd, 2000);
+        if (onClose) setTimeout(onClose, 2000);
     };
 
     const startTimer = () => {
@@ -175,8 +178,23 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
     };
 
     return (
-        <div className="voice-call-overlay" onClick={(e) => status === 'ready' || status === 'error' || status === 'ended' ? onEnd() : null}>
-            <div className="voice-call-card" onClick={e => e.stopPropagation()}>
+        <div className="voice-call-overlay" onClick={(e) => (status === 'ready' || status === 'error' || status === 'ended') && onClose ? onClose() : null}>
+            <div className="voice-call-card" style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+                <button
+                    onClick={onClose}
+                    style={{
+                        position: 'absolute',
+                        top: '10px',
+                        right: '10px',
+                        background: 'none',
+                        border: 'none',
+                        fontSize: '1.2rem',
+                        cursor: 'pointer',
+                        color: 'var(--text-muted)'
+                    }}
+                >
+                    ✕
+                </button>
                 <div className="call-avatar">
                     {phoneNumber ? phoneNumber.replace(/\+/g, '').charAt(0) : '☎️'}
                 </div>
@@ -244,7 +262,7 @@ const VoiceCall = ({ clinicId, phoneNumber, onEnd }) => {
                     {(status === 'ready' || status === 'error' || status === 'ended') && (
                         <button
                             className="btn-secondary"
-                            onClick={onEnd}
+                            onClick={onClose}
                             style={{ padding: '10px 20px', borderRadius: '10px' }}
                         >
                             Cerrar
