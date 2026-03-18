@@ -7,6 +7,7 @@ import AiAgentSection from "./AiAgentSection";
 import MetaConnectModal from "./MetaConnectModal";
 import ConversationsManager from "./ConversationsManager";
 import { initFacebookSDK, loginWithFacebook } from "../utils/facebookSDK";
+import AutomationsKanban from "./AutomationsKanban";
 
 const AdminPanel = ({ token, onBack, userRole }) => {
     console.log("AdminPanel Mount - Role:", userRole);
@@ -3377,6 +3378,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 <span className="sidebar-text">Email Automatizados</span></button>
                                     <button className={activeView === "whatsapp" ? "active" : ""} onClick={() => setActiveView("whatsapp")}>💬 <span className="sidebar-text">WhatsApp (Whaticket)</span></button>
                                     <button className={activeView === "ai_agent" ? "active" : ""} onClick={() => setActiveView("ai_agent")}>🤖 <span className="sidebar-text">Agente IA</span></button>
+                                    <button className={activeView === "automatizaciones" ? "active" : ""} onClick={() => setActiveView("automatizaciones")}>🔁 <span className="sidebar-text">Automatizaciones (Flujo)</span></button>
                                     <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
                                     <button className={activeView === "zadarma" ? "active" : ""} onClick={() => setActiveView("zadarma")}>☎️ <span className="sidebar-text">Zadarma Llamadas</span></button>
 
@@ -3402,6 +3404,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "email" && renderEmail()}
                     {activeView === "whatsapp" && renderWhaticket()}
                     {activeView === "ai_agent" && <AiAgentSection clinicId={clinicId} />}
+                    {activeView === "automatizaciones" && <AutomationsKanban clinicId={clinicId} />}
                     {activeView === "meta" && renderMetaConfig()}
                     {activeView === "zadarma" && renderZadarma()}
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../supabase";
+import { executeAutomations } from "../utils/automationsEngine";
 
 export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agendaId, token, userRole, initialData = null, currentUserName = "" }) {
 
@@ -520,8 +521,16 @@ export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agen
                     .single();
 
                 if (error) throw error;
+                // Old hardcoded triggers
                 triggerSMS('booking_confirmation', data);
                 triggerEmail('booking_confirmation', data);
+
+                // --- NEW MULTI-FLOW AUTOMATIONS ENGINE ---
+                const { data: agendaData } = await supabase.from('agendas').select('clinic_id').eq('id', agendaId).single();
+                if (agendaData?.clinic_id) {
+                    executeAutomations(agendaData.clinic_id, 't_new_appt', data).catch(e => console.error("AutoEngine Err:", e));
+                }
+                // -----------------------------------------
             }
             onCitaCreated();
         } catch (error) {

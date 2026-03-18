@@ -10,6 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@hello-pangea/dnd": "^18.0.1",
     "@supabase/supabase-js": "^2.94.1",
     "@twilio/voice-sdk": "^2.18.0",
     "dotenv": "^17.2.3",
