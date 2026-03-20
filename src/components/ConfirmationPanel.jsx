@@ -7,6 +7,17 @@ const ConfirmationPanel = ({ user, onEditCita, onRefresh }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [showCancelled, setShowCancelled] = useState(false);
+    const [selectedPackage, setSelectedPackage] = useState(null);
+
+    // Keep selectedPackage updated if background refresh or actions happen
+    useEffect(() => {
+        if (selectedPackage && packages.length > 0) {
+            const updated = packages.find(p => p.id === selectedPackage.id);
+            if (updated && updated !== selectedPackage) {
+                setSelectedPackage(updated);
+            }
+        }
+    }, [packages]);
 
     // Modal State
     const [confirmModal, setConfirmModal] = useState({
@@ -301,68 +312,63 @@ const ConfirmationPanel = ({ user, onEditCita, onRefresh }) => {
     const colSuccess = packages.filter(p => p.status === 'success');
     const colCancelled = packages.filter(p => p.status === 'cancelled');
 
-    const renderPackageCard = (pkg, styleClass) => (
-        <div key={pkg.id} className={`confirmation-card-pro ${styleClass}`} style={{ padding: '0', overflow: 'hidden' }}>
-            <div className="card-pro-header" style={{ padding: '12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <div>
-                    <h4 className="pro-name">{pkg.patient}</h4>
-                    <span className="pro-badge service-badge">{pkg.service}</span>
+    const renderPackageCard = (pkg, styleClass) => {
+        // Generar texto para el tooltip nativo
+        const pendingSessionsCount = pkg.sessions.filter(s => s.confirmacion !== 'Confirmada' && s.confirmacion !== 'Cancelada').length;
+        const previewText = `Paciente: ${pkg.patient}\nServicio: ${pkg.service}\nSesiones: ${pkg.sessions.length} (${pendingSessionsCount} pendientes)\n\nDetalles:\n` +
+            pkg.sessions.map(s => `- ${s.fecha} ${s.hora} (${s.confirmacion || 'Pendiente'})`).join('\n');
+
+        return (
+            <div key={pkg.id} className={`confirmation-card-pro ${styleClass}`} style={{ padding: '0', overflow: 'hidden', marginBottom: '12px' }} title={previewText}>
+                <div
+                    className="card-pro-header"
+                    style={{
+                        padding: '12px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        cursor: 'pointer',
+                        background: 'var(--input-bg)',
+                        borderBottom: '1px solid var(--glass-border)'
+                    }}
+                    onClick={() => setSelectedPackage(pkg)}
+                >
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                        <h4 className="pro-name" style={{ margin: 0, fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pkg.patient}</h4>
+                        <span className="pro-badge service-badge" style={{ marginTop: '4px', display: 'inline-block', fontSize: '0.75rem' }}>
+                            {pkg.service} • {pkg.sessions.length} {pkg.sessions.length === 1 ? 'sesión' : 'sesiones'}
+                        </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '10px' }}>
+                        <div className={`status-indicator ${styleClass.replace('border-', 'status-')}`}></div>
+                        <button
+                            className="btn-open-modal"
+                            style={{
+                                background: 'var(--btn-secondary-bg)',
+                                border: '1px solid var(--glass-border)',
+                                color: 'var(--text-main)',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem',
+                                padding: '6px 10px',
+                                borderRadius: '4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                fontWeight: 'bold',
+                                transition: 'all 0.2s'
+                            }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPackage(pkg);
+                            }}
+                        >
+                            Ver Detalles 🗂️
+                        </button>
+                    </div>
                 </div>
-                <div className={`status-indicator ${styleClass.replace('border-', 'status-')}`}></div>
             </div>
-
-            <div style={{ background: 'rgba(0,0,0,0.1)' }}>
-                {pkg.sessions.map((s, idx) => {
-                    const isConfirmed = s.confirmacion === 'Confirmada';
-                    const isCancelled = s.confirmacion === 'Cancelada';
-
-                    if (!showCancelled && isCancelled) return null;
-
-                    return (
-                        <div key={s.id} style={{
-                            display: 'grid',
-                            gridTemplateColumns: '30px 1fr auto',
-                            gap: '10px',
-                            padding: '10px 12px',
-                            borderBottom: '1px solid rgba(255,255,255,0.05)',
-                            alignItems: 'center',
-                            opacity: isCancelled ? 0.5 : 1,
-                            textDecoration: isCancelled ? 'line-through' : 'none',
-                            background: isConfirmed ? 'rgba(16, 185, 129, 0.05)' : 'transparent'
-                        }}>
-                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>#{s.sesion_nro || idx + 1}</div>
-
-                            <div>
-                                <div style={{ fontSize: '0.9rem', color: s.days_until <= 1 && !isConfirmed ? 'var(--danger)' : 'var(--text-main)' }}>
-                                    {s.fecha} - {s.hora}
-                                </div>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                    {s.agenda_nombre} {s.days_until >= -1 && s.days_until <= 30 && !isConfirmed ? `(${s.days_until} días)` : ''}
-                                </div>
-                            </div>
-
-                            <div style={{ display: 'flex', gap: '5px' }}>
-                                {/* Only show actions if not cancelled/confirmed (mostly) */}
-                                {!isConfirmed && !isCancelled && (
-                                    <>
-                                        <button className="btn-icon-mini" onClick={() => handleWhatsApp(s.celular, s.nombres_completos, s.fecha, s.hora)} title="WhatsApp">💬</button>
-                                        <button className="btn-icon-mini" onClick={() => handleManualSMS(s.nombres_completos, s.celular, s.fecha, s.hora)} title="Enviar SMS Infobip">📲</button>
-                                        <button className="btn-icon-mini" onClick={() => handleManualEmail(s.nombres_completos, s.email, s.fecha, s.hora)} title="Enviar Email Hostinger">📧</button>
-                                        <button className="btn-icon-mini" onClick={() => onEditCita(s)} title="Editar/Aplazar">✏️</button>
-                                        <button className="btn-icon-mini" onClick={() => handleConfirm(s.id)} title="Confirmar" style={{ color: 'var(--success)' }}>✅</button>
-                                        <button className="btn-icon-mini" onClick={() => handleCancel(s.id)} title="Eliminar" style={{ color: 'var(--danger)' }}>🗑️</button>
-                                    </>
-                                )}
-                                {isConfirmed && <span style={{ color: 'var(--success)', fontSize: '1.2rem' }}>✅</span>}
-                                {isCancelled && <span style={{ color: 'var(--danger)', fontSize: '1.2rem' }}>🚫</span>}
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
-            {/* Quick Actions Footer for Whole Package? Maybe later */}
-        </div>
-    );
+        );
+    };
 
     return (
         <div className="confirmation-panel-container">
@@ -413,6 +419,89 @@ const ConfirmationPanel = ({ user, onEditCita, onRefresh }) => {
                 </div>
             </div>
 
+            {/* Package Details Modal */}
+            {selectedPackage && (
+                <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease-out' }} onClick={() => setSelectedPackage(null)}>
+                    <div className="modal-content-pro" style={{ background: 'var(--card-bg)', backdropFilter: 'blur(16px)', width: '90%', maxWidth: '750px', maxHeight: '85vh', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', border: '1px solid var(--glass-border)', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ padding: '20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--input-bg)' }}>
+                            <div>
+                                <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <span style={{ fontSize: '1.5rem' }}>🗂️</span> {selectedPackage.patient}
+                                </h2>
+                                <p style={{ margin: '5px 0 0 0', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
+                                    {selectedPackage.service} • {selectedPackage.sessions.length} {selectedPackage.sessions.length === 1 ? 'sesión' : 'sesiones'}
+                                </p>
+                            </div>
+                            <button onClick={() => setSelectedPackage(null)} style={{ background: 'var(--btn-secondary-bg)', border: '1px solid var(--glass-border)', color: 'var(--text-main)', fontSize: '1.4rem', cursor: 'pointer', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}>&times;</button>
+                        </div>
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 0', background: 'transparent' }}>
+                            {selectedPackage.sessions.map((s, idx) => {
+                                const isConfirmed = s.confirmacion === 'Confirmada';
+                                const isCancelled = s.confirmacion === 'Cancelada';
+
+                                if (!showCancelled && isCancelled) return null;
+
+                                return (
+                                    <div key={s.id} style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: '40px 1fr auto',
+                                        gap: '15px',
+                                        padding: '15px 20px',
+                                        borderBottom: '1px solid var(--glass-border)',
+                                        alignItems: 'center',
+                                        opacity: isCancelled ? 0.5 : 1,
+                                        textDecoration: isCancelled ? 'line-through' : 'none',
+                                        background: isConfirmed ? 'rgba(16, 185, 129, 0.05)' : 'transparent',
+                                        transition: 'background 0.2s'
+                                    }}
+                                        className="session-row-hover"
+                                    >
+                                        <div style={{ fontSize: '1rem', color: 'var(--text-main)', fontWeight: 'bold', textAlign: 'center', background: 'var(--input-bg)', border: '1px solid var(--glass-border)', borderRadius: '6px', padding: '5px' }}>
+                                            #{s.sesion_nro || idx + 1}
+                                        </div>
+
+                                        <div>
+                                            <div style={{ fontSize: '1.05rem', fontWeight: '500', color: s.days_until <= 1 && !isConfirmed ? 'var(--danger)' : 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                📅 {s.fecha} <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>⏱️ {s.hora}</span>
+                                            </div>
+                                            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                                <span>🏷️ {s.agenda_nombre}</span>
+                                                {s.days_until >= -1 && s.days_until <= 30 && !isConfirmed && (
+                                                    <span style={{ background: s.days_until <= 1 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)', color: s.days_until <= 1 ? 'var(--danger)' : 'var(--warning)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem' }}>
+                                                        {s.days_until === 0 ? 'Hoy' : s.days_until === 1 ? 'Mañana' : s.days_until === -1 ? 'Ayer' : `Faltan ${s.days_until} días`}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                            {!isConfirmed && !isCancelled && (
+                                                <>
+                                                    <button className="btn-icon-mini" onClick={() => handleWhatsApp(s.celular, s.nombres_completos, s.fecha, s.hora)} title="WhatsApp">💬</button>
+                                                    <button className="btn-icon-mini" onClick={() => handleManualSMS(s.nombres_completos, s.celular, s.fecha, s.hora)} title="Enviar SMS Infobip">📲</button>
+                                                    <button className="btn-icon-mini" onClick={() => handleManualEmail(s.nombres_completos, s.email, s.fecha, s.hora)} title="Enviar Email Hostinger">📧</button>
+                                                    <div style={{ width: '1px', height: '20px', background: 'var(--glass-border)', margin: '0 5px' }}></div>
+                                                    <button className="btn-icon-mini" onClick={() => { setSelectedPackage(null); onEditCita(s); }} title="Editar/Aplazar">✏️</button>
+                                                    <button className="btn-icon-mini" onClick={() => handleConfirm(s.id)} title="Confirmar" style={{ color: 'var(--success)' }}>✅</button>
+                                                    <button className="btn-icon-mini" onClick={() => handleCancel(s.id)} title="Eliminar" style={{ color: 'var(--danger)' }}>🗑️</button>
+                                                </>
+                                            )}
+                                            {isConfirmed && <span style={{ color: 'var(--success)', fontSize: '1.4rem', padding: '5px' }} title="Confirmada">✅</span>}
+                                            {isCancelled && <span style={{ color: 'var(--danger)', fontSize: '1.4rem', padding: '5px' }} title="Cancelada">🚫</span>}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {selectedPackage.sessions.length === 0 && (
+                                <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                                    No hay sesiones para mostrar.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <ConfirmModal
                 isOpen={confirmModal.isOpen}
                 onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
@@ -434,6 +523,34 @@ const ConfirmationPanel = ({ user, onEditCita, onRefresh }) => {
                     transition: transform 0.2s;
                 }
                 .btn-icon-mini:hover { transform: scale(1.2); }
+                @keyframes fadeIn {
+                    from { opacity: 0; transform: translateY(-5px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                .card-pro-header:hover {
+                    background: var(--btn-secondary-bg) !important;
+                }
+                .column-content-pro {
+                    overflow-y: auto !important;
+                    overflow-x: hidden;
+                    max-height: calc(100vh - 180px); /* Ajuste de altura para permitir scroll local */
+                }
+                .column-content-pro::-webkit-scrollbar {
+                    width: 6px;
+                }
+                .column-content-pro::-webkit-scrollbar-thumb {
+                    background-color: var(--primary);
+                    border-radius: 10px;
+                }
+                .session-row-hover:hover {
+                    background: var(--input-bg) !important;
+                }
+                .btn-open-modal:hover {
+                    background: var(--primary) !important;
+                    color: white !important;
+                    border-color: var(--primary) !important;
+                    transform: scale(1.05);
+                }
             `}</style>
         </div>
     );

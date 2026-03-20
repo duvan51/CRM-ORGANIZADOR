@@ -738,6 +738,193 @@ const AgentDashboard = ({ user }) => {
         );
     };
 
+    const AgentPerformanceView = () => {
+        const [manualData, setManualData] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [selectedAgenda, setSelectedAgenda] = useState(-1);
+
+        const currentYear = new Date().getFullYear();
+        const currentMonth = new Date().getMonth();
+        const allAgendas = [{ id: -1, name: "🌐 TODAS LAS SEDES" }, ...(user.agendas || [])];
+
+        useEffect(() => {
+            const fetchAgentsData = async () => {
+                setLoading(true);
+                const clinicId = user.clinic_id || user.id;
+
+                const { data: manData } = await supabase
+                    .from('manual_performance_data')
+                    .select('*')
+                    .eq('clinic_id', clinicId)
+                    .eq('month', selectedMonth + 1)
+                    .eq('year', selectedYear);
+
+                setManualData(manData || []);
+                setLoading(false);
+            };
+            fetchAgentsData();
+        }, [selectedMonth, selectedYear]);
+
+        // Aggregate stats
+        const agentStats = {};
+        manualData.forEach(d => {
+            if (selectedAgenda !== -1 && d.agenda_id !== selectedAgenda) return;
+            if (d.agent_stats) {
+                Object.keys(d.agent_stats).forEach(agent => {
+                    if (!agentStats[agent]) agentStats[agent] = { sales: 0, leads: 0 };
+                    agentStats[agent].sales += (d.agent_stats[agent].sales || 0);
+                    agentStats[agent].leads += (d.agent_stats[agent].leads || 0);
+                });
+            }
+        });
+
+        const sortedAgents = Object.entries(agentStats).sort((a, b) => b[1].sales - a[1].sales);
+        const formatCOP = (val) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Math.round(val));
+        const maxSales = sortedAgents.length > 0 ? Math.max(...sortedAgents.map(a => a[1].sales)) : 1;
+
+        return (
+            <div className="agent-performance-view animate-in">
+                <div className="dashboard-controls card" style={{ marginBottom: '20px', padding: '25px', background: 'rgba(var(--primary-rgb), 0.03)', border: '1px solid var(--glass-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <div className="year-selector-premium" style={{ display: 'flex', gap: '15px', alignItems: 'center', background: 'var(--card-bg)', padding: '8px 20px', borderRadius: '16px', border: '1px solid var(--glass-border)', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
+                            <label style={{ fontWeight: '700', fontSize: '0.9rem', color: 'var(--text-main)', opacity: 0.8 }}>Año Fiscal</label>
+                            <select value={selectedYear} onChange={e => handleMonthYearChange(selectedMonth, parseInt(e.target.value))} style={{ background: 'var(--primary)', color: 'white', borderRadius: '10px', padding: '6px 18px', border: 'none', fontWeight: '700', fontSize: '0.9rem', cursor: 'pointer', outline: 'none', boxShadow: '0 2px 8px rgba(var(--primary-rgb), 0.3)' }}>
+                                {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: 'var(--card-bg)', padding: '5px 15px', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                            <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>Modo Vista:</span>
+                            <strong style={{ fontSize: '0.9rem', color: 'var(--primary)' }}>Rendimiento Agentes</strong>
+                        </div>
+                    </div>
+
+                    <div className="months-navigation" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', borderTop: '1px solid var(--glass-border)', paddingTop: '15px' }}>
+                        {months.map((m, i) => {
+                            const isFuture = selectedYear === currentYear && i > currentMonth;
+                            const isActive = selectedMonth === i;
+                            return (
+                                <button key={m} disabled={isFuture} onClick={() => handleMonthYearChange(i, selectedYear)} style={{ padding: '8px 15px', borderRadius: '15px', border: '1px solid var(--glass-border)', background: isActive ? 'var(--primary)' : 'transparent', color: isFuture ? '#666' : 'white', cursor: isFuture ? 'not-allowed' : 'pointer', opacity: isFuture ? 0.4 : 1, transition: 'all 0.2s', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
+                                    {m}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Filtro por Sede / Agenda */}
+                    {allAgendas.length > 1 && (
+                        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginTop: '15px' }}>
+                            {allAgendas.map(ag => (
+                                <button
+                                    key={ag.id}
+                                    onClick={() => setSelectedAgenda(ag.id)}
+                                    style={{
+                                        padding: '6px 12px',
+                                        borderRadius: '12px',
+                                        border: `1px solid ${selectedAgenda === ag.id ? 'var(--primary)' : 'var(--glass-border)'}`,
+                                        background: selectedAgenda === ag.id ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
+                                        color: selectedAgenda === ag.id ? 'var(--primary)' : 'var(--text-main)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        fontSize: '0.8rem',
+                                        whiteSpace: 'nowrap',
+                                        fontWeight: selectedAgenda === ag.id ? 'bold' : 'normal'
+                                    }}
+                                >
+                                    {ag.name}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'flex-start' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', background: 'rgba(46, 213, 115, 0.05)', border: '1px solid rgba(46, 213, 115, 0.3)', padding: '10px 20px', borderRadius: '12px' }}>
+                        <span style={{ fontSize: '1.8rem' }}>💰</span>
+                        <div>
+                            <h3 style={{ margin: 0, color: 'var(--text-main)', fontSize: '0.75rem', textTransform: 'uppercase', opacity: 0.8, fontWeight: '700' }}>
+                                {selectedAgenda === -1 ? 'Facturación (Todas las Sedes)' : `Facturación: ${allAgendas.find(a => a.id === selectedAgenda)?.name}`}
+                            </h3>
+                            <p style={{ margin: '2px 0 0 0', color: '#2ed573', fontSize: '1.4rem', fontWeight: '900' }}>
+                                {formatCOP(Object.values(agentStats).reduce((acc, curr) => acc + curr.sales, 0))}
+                            </p>
+                            <span style={{ display: 'block', fontSize: '0.75rem', opacity: 0.8, color: 'var(--text-muted)' }}>
+                                {Object.values(agentStats).reduce((acc, curr) => acc + curr.leads, 0)} leads en total
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="dashboard-table-container card">
+                    <div className="table-header-dash">
+                        <h3>Top Vendedores e Ingresos Consolidados ({months[selectedMonth]} {selectedYear})</h3>
+                    </div>
+                    <div className="table-wrapper" style={{ padding: '20px' }}>
+                        {loading ? (
+                            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>⏳ Cargando datos de agentes...</div>
+                        ) : sortedAgents.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>No hay datos de ventas registrados para este mes.</div>
+                        ) : (
+                            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                    <tr style={{ borderBottom: '1px solid var(--glass-border)', textAlign: 'left' }}>
+                                        <th style={{ padding: '12px' }}>Posición</th>
+                                        <th style={{ padding: '12px' }}>Agente / Vendedor</th>
+                                        <th style={{ padding: '12px' }}>Ventas Totales (COP)</th>
+                                        <th style={{ padding: '12px', width: '30%' }}>Progreso (%)</th>
+                                        <th style={{ padding: '12px', textAlign: 'center' }}>Leads Gestionados</th>
+                                        <th style={{ padding: '12px', textAlign: 'center' }}>LTV Estimado / Lead</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {sortedAgents.map(([agentName, stats], index) => {
+                                        const percentage = maxSales > 0 ? (stats.sales / maxSales) * 100 : 0;
+                                        return (
+                                            <tr key={agentName} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s', background: index === 0 ? 'rgba(255, 215, 0, 0.03)' : 'transparent' }}>
+                                                <td style={{ padding: '15px 12px', fontSize: '1.2rem', fontWeight: 'bold', color: index === 0 ? '#ffd700' : index === 1 ? '#c0c0c0' : index === 2 ? '#cd7f32' : 'var(--text-muted)' }}>
+                                                    #{index + 1}
+                                                </td>
+                                                <td style={{ padding: '15px 12px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <div style={{ width: '35px', height: '35px', borderRadius: '50%', background: 'linear-gradient(135deg, var(--primary), var(--secondary))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
+                                                            {agentName.substring(0, 2).toUpperCase()}
+                                                        </div>
+                                                        <strong style={{ fontSize: '1.05rem', color: 'var(--text-main)' }}>{agentName}</strong>
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '15px 12px' }}>
+                                                    <span style={{ fontSize: '1.2rem', fontWeight: '900', color: 'var(--primary)' }}>
+                                                        {formatCOP(stats.sales)}
+                                                    </span>
+                                                    {index === 0 && <span style={{ marginLeft: '10px', fontSize: '1.2rem' }}>👑</span>}
+                                                </td>
+                                                <td style={{ padding: '15px 12px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <div style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+                                                            <div style={{ width: `${percentage}%`, height: '100%', background: index === 0 ? 'linear-gradient(90deg, #ffd700, #ffb142)' : 'var(--primary)', borderRadius: '4px', transition: 'width 0.5s ease-out' }}></div>
+                                                        </div>
+                                                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', minWidth: '40px' }}>{Math.round(percentage)}%</span>
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '15px 12px', textAlign: 'center' }}>
+                                                    <div style={{ display: 'inline-block', padding: '6px 12px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)', borderRadius: '10px', fontSize: '0.9rem', fontWeight: '600' }}>
+                                                        {stats.leads} L
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '15px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                                                    {stats.leads > 0 ? formatCOP(stats.sales / stats.leads) + '/lead' : '-'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const ConsolidatedView = () => {
         const [manualData, setManualData] = useState([]);
         const [metaAggregated, setMetaAggregated] = useState({});
@@ -1283,6 +1470,20 @@ const AgentDashboard = ({ user }) => {
                         >
                             🤖 Monitor IA
                         </button>
+                        <button
+                            className={`btn-tab ${view === 'agents' ? 'active' : ''}`}
+                            onClick={() => setView('agents')}
+                            style={{
+                                padding: '10px 20px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--glass-border)',
+                                background: view === 'agents' ? 'var(--primary)' : 'transparent',
+                                color: view === 'agents' ? 'white' : 'var(--text-main)',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            👥 Rendimiento Agentes
+                        </button>
                     </>
                 )}
             </div>
@@ -1419,6 +1620,8 @@ const AgentDashboard = ({ user }) => {
                 <MetaAdsView />
             ) : view === 'aimonitor' ? (
                 <AiChatMonitor />
+            ) : view === 'agents' ? (
+                <AgentPerformanceView />
             ) : (
                 <ConsolidatedView />
             )}
