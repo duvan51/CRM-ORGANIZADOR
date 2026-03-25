@@ -19,6 +19,7 @@ import QuickScheduleModal from "./components/QuickScheduleModal.jsx";
 import ResetPasswordForm from "./components/ResetPasswordForm.jsx";
 import MasterPanel from "./components/MasterPanel.jsx";
 import VoiceCall from "./components/VoiceCall.jsx";
+import CrmLeadsBoard from "./components/CrmLeadsBoard.jsx";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div className="field-manager-container">
     <h4 className="field-manager-title">Columnas a unificar:</h4>
@@ -58,7 +59,7 @@ function App() {
     }
   }, [user]);
 
-  const [fields, setFields] = useState(["nombre", "fecha", "servicios"]);
+  const [fields, setFields] = useState(["nombres_completos", "fecha", "hora", "tipo_servicio", "celular", "documento"]);
   const [newFieldName, setNewFieldName] = useState("");
   const [selection, setSelection] = useState({});
   const [mapping, setMapping] = useState({});
@@ -280,11 +281,12 @@ function App() {
   };
 
   const SINONIMOS = {
-    nombre: ["paciente", "nombre", "cliente", "usuario", "nombre_completo", "nombre_y_apellido"],
+    nombres_completos: ["paciente", "nombre", "cliente", "usuario", "nombre_completo", "nombre_y_apellido", "nombres", "nombres_completos"],
     fecha: ["fecha", "dia", "fec", "fecha_de_atencion", "fecha_atencion"],
-    servicios: ["concepto", "servicio", "servicios", "procedimiento", "descripcion"],
-    telefono: ["tel", "cel", "telefono", "celular", "movil"],
-    id: ["id", "cedula", "documento", "identificacion", "nit"]
+    hora: ["hora", "horario"],
+    tipo_servicio: ["concepto", "servicio", "servicios", "procedimiento", "descripcion", "tipo_servicio"],
+    celular: ["tel", "cel", "telefono", "celular", "movil", "whatsapp"],
+    documento: ["id", "cedula", "documento", "identificacion", "nit", "dni", "cc"]
   };
 
   const autoSuggestForField = (cols, field) => {
@@ -360,6 +362,43 @@ function App() {
     }
   };
 
+  const parseExcelDate = (val) => {
+    if (!val) return new Date().toISOString().split('T')[0];
+    if (typeof val === 'number') {
+      const d = new Date(new Date(1899, 11, 30).getTime() + val * 86400000);
+      return d.toISOString().split('T')[0];
+    }
+    if (typeof val === 'string') {
+      let parts = val.includes('/') ? val.split('/') : val.split('-');
+      if (parts.length === 3) {
+        let p1 = parseInt(parts[0]), p2 = parseInt(parts[1]);
+        let y = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+        let d = p1, m = p2;
+        if (p1 > 31) { y = parts[0]; m = parts[1]; d = parts[2]; } else if (p2 > 12) { m = p1; d = p2; }
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      }
+      const dObj = new Date(val);
+      if (!isNaN(dObj.getTime())) return dObj.toISOString().split('T')[0];
+    }
+    return new Date().toISOString().split('T')[0];
+  };
+
+  const parseExcelTime = (val) => {
+    if (val === undefined || val === null || val === "") return "08:00";
+    if (typeof val === 'number') {
+      const mins = Math.round(val * 24 * 60);
+      return `${String(Math.floor(mins / 60) % 24).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+    }
+    if (typeof val === 'string') {
+      const match = val.match(/\d{1,2}:\d{2}/);
+      if (match) {
+        const [h, m] = match[0].split(':');
+        return `${h.padStart(2, '0')}:${m}`;
+      }
+    }
+    return "08:00";
+  };
+
   const processMapping = async () => {
     setLoading(true);
     setError(null);
@@ -374,25 +413,28 @@ function App() {
           }
         });
         return {
-          vendedor: user.full_name || user.username,
+          vendedor_asignado: (user.role === 'superuser' || user.role === 'owner' || user.role === 'admin') ? null : (user.full_name || user.username),
+          estado: 'Nuevo',
+          observaciones: mappedRow.observaciones || "",
           ...mappedRow,
+          fecha: parseExcelDate(mappedRow.fecha) || null,
+          hora: parseExcelTime(mappedRow.hora) || null,
+          servicios: mappedRow.tipo_servicio || "",
           agenda_id: activeAgenda.id
         };
       });
 
-      const { data, error: sbError } = await supabase
-        .from('citas')
+      const { error: sbError } = await supabase
+        .from('crm_leads')
         .insert(citasToInsert);
 
       if (sbError) throw sbError;
 
-      alert(`✅ ${citasToInsert.length} citas cargadas exitosamente en la agenda ${activeAgenda.name}`);
-      setStep(1);
-      setResult(null);
-      setFiles(null);
+      alert(`✅ ${citasToInsert.length} prospectos cargados exitosamente al tablero CRM.`);
+      setStep('board');
     } catch (err) {
       console.error(err);
-      setError("Error subiendo datos a Supabase: " + err.message);
+      setError("Error procesando los datos: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -501,13 +543,40 @@ function App() {
 
   const AppContent = () => (
     <div className="card">
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+        <button className={step === 'board' || step === 3 ? "btn-process" : "btn-secondary"} onClick={() => setStep('board')}>Tablero Leads</button>
+        <button className={step === 1 || step === 2 ? "btn-process" : "btn-secondary"} onClick={() => setStep(1)}>Subir Dataset</button>
+      </div>
+
+      {error && (
+        <div style={{ padding: "10px", backgroundColor: "rgba(239, 68, 68, 0.1)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: "8px", marginBottom: "15px" }}>
+          <strong>Error:</strong> {error}
+        </div>
+      )}
       {step === 1 && (
         <>
           <FieldManager fields={fields} newFieldName={newFieldName} setNewFieldName={setNewFieldName} addField={addField} removeField={removeField} />
           <div className="upload-section">
-            <input type="file" multiple accept=".xlsx,.xls" onChange={(e) => setFiles(e.target.files)} className="custom-file-input" />
+            <input type="file" multiple accept=".xlsx,.xls,.csv" onChange={(e) => {
+              setFiles(e.target.files);
+              setError(null);
+            }} className="custom-file-input" />
+
+            {files && files.length > 0 && (
+              <div style={{ marginTop: "15px", padding: "12px", backgroundColor: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: "8px", color: "var(--text-main)" }}>
+                <strong>✅ Archivos listos para analizar ({files.length}):</strong>
+                <ul style={{ margin: "8px 0 0 20px", fontSize: "0.95rem" }}>
+                  {Array.from(files).map((f, i) => (
+                    <li key={i}>{f.name}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="crm-actions-wrapper">
-              <button className="btn-process" onClick={() => uploadFiles(false)} disabled={loading || !files}>Analizar</button>
+              <button className="btn-process" onClick={() => uploadFiles(false)} disabled={loading || !files || files.length === 0}>
+                {loading ? "Analizando..." : "Analizar"}
+              </button>
               <button className="btn-process" style={{ background: "rgba(239, 68, 68, 0.1)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.2)" }} onClick={clearAllFiles}>Limpiar</button>
             </div>
           </div>
@@ -562,19 +631,12 @@ function App() {
               </div>
             </div>
           </div>
-          <button className="btn-process" onClick={processMapping} disabled={loading}>Procesar Archivos</button>
+          <button className="btn-process" onClick={processMapping} disabled={loading}>Guardar en Tablero</button>
         </>
       )}
-      {step === 3 && result && (
+      {(step === 3 || step === 'board') && (
         <div>
-          <input type="text" placeholder="Filtrar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="custom-file-input" style={{ marginBottom: 20 }} />
-          <div className="table-container">
-            <table>
-              <thead><tr>{result.columnas_reportadas?.map(c => <th key={c}>{c}</th>)}</tr></thead>
-              <tbody>{filteredData.map((row, i) => <tr key={i}>{result.columnas_reportadas?.map(c => <td key={c}>{row[c]}</td>)}</tr>)}</tbody>
-            </table>
-          </div>
-          <button className="btn-process" onClick={() => { setStep(1); setFiles(null); setResult(null); }}>Volver al inicio</button>
+          <CrmLeadsBoard user={user} activeAgenda={activeAgenda} />
         </div>
       )}
     </div>
