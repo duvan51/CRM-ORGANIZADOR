@@ -15,14 +15,29 @@ const MetaConnectModal = ({ isOpen, onClose, accessToken, onSave }) => {
     const [selectedPages, setSelectedPages] = useState([]);
     const [selectedInstagrams, setSelectedInstagrams] = useState([]);
 
+    const [errorLog, setErrorLog] = useState([]);
+    const [permissions, setPermissions] = useState([]);
+
     useEffect(() => {
         if (isOpen && accessToken) {
             fetchBusinesses();
+            fetchPermissions();
         }
     }, [isOpen, accessToken]);
 
+    const fetchPermissions = async () => {
+        try {
+            const resp = await fetch(`https://graph.facebook.com/v18.0/me/permissions?access_token=${accessToken}`);
+            const data = await resp.json();
+            if (data.data) setPermissions(data.data.filter(p => p.status === 'granted').map(p => p.permission));
+        } catch (e) {
+            console.error("Error fetching permissions:", e);
+        }
+    };
+
     const fetchBusinesses = async () => {
         setLoading(true);
+        setErrorLog([]);
         try {
             const resp = await fetch(`https://graph.facebook.com/v18.0/me/businesses?access_token=${accessToken}`);
             const data = await resp.json();
@@ -37,41 +52,42 @@ const MetaConnectModal = ({ isOpen, onClose, accessToken, onSave }) => {
 
     const fetchAssets = async (businessId) => {
         setLoading(true);
+        setErrorLog([]);
         try {
             // Fetch Ad Accounts
             const adResp = await fetch(`https://graph.facebook.com/v18.0/${businessId}/client_ad_accounts?fields=name,account_id,id&access_token=${accessToken}`);
             const adData = await adResp.json();
-            if (adData.error) console.error("Error fetching client_ad_accounts:", adData.error);
+            if (adData.error) setErrorLog(prev => [...prev, `Ad Accounts Error: ${adData.error.message}`]);
 
             // Si el anterior falla o viene vacío, intentar con owned_ad_accounts
             let finalAds = adData.data || [];
             if (finalAds.length === 0) {
                 const adOwnedResp = await fetch(`https://graph.facebook.com/v18.0/${businessId}/owned_ad_accounts?fields=name,account_id,id&access_token=${accessToken}`);
                 const adOwnedData = await adOwnedResp.json();
-                if (adOwnedData.error) console.error("Error fetching owned_ad_accounts:", adOwnedData.error);
                 finalAds = adOwnedData.data || [];
             }
 
             setAdAccounts(finalAds);
 
             // Fetch WABAs
+            let currentWabas = [];
             try {
                 console.log(`Fetching WABAs for business: ${businessId}...`);
                 const wabaResp = await fetch(`https://graph.facebook.com/v18.0/${businessId}/whatsapp_business_accounts?fields=name,id,status&access_token=${accessToken}`);
                 const wabaData = await wabaResp.json();
 
-                let currentWabas = [];
                 if (!wabaData.error) {
                     const clientWabaResp = await fetch(`https://graph.facebook.com/v18.0/${businessId}/client_whatsapp_business_accounts?fields=name,id,status&access_token=${accessToken}`);
                     const clientWabaData = await clientWabaResp.json();
                     currentWabas = [...(wabaData.data || []), ...(clientWabaData.data || [])];
                 } else {
-                    console.warn("WhatsApp no disponible via Business ID:", wabaData.error.message);
+                    setErrorLog(prev => [...prev, `WABA ID Error: ${wabaData.error.message}`]);
                 }
 
                 if (currentWabas.length === 0) {
                     const userWabaResp = await fetch(`https://graph.facebook.com/v18.0/me/whatsapp_business_accounts?fields=name,id,status&access_token=${accessToken}`);
                     const userWabaData = await userWabaResp.json();
+                    if (userWabaData.error) setErrorLog(prev => [...prev, `WABA Me Error: ${userWabaData.error.message}`]);
                     currentWabas = userWabaData.data || [];
                 }
 
@@ -86,19 +102,17 @@ const MetaConnectModal = ({ isOpen, onClose, accessToken, onSave }) => {
 
                 setWabas(wabasWithPhones);
             } catch (wabaErr) {
-                console.error("Error obteniendo WABAs:", wabaErr);
+                setErrorLog(prev => [...prev, `WABA Fetch Exception: ${wabaErr.message}`]);
                 setWabas([]);
             }
 
             // Fetch Facebook Pages
-            console.log("Fetching Pages...");
             const pagesResp = await fetch(`https://graph.facebook.com/v18.0/me/accounts?fields=name,id,access_token,category,picture&access_token=${accessToken}`);
             const pagesData = await pagesResp.json();
             const finalPages = pagesData.data || [];
             setPages(finalPages);
 
-            // Fetch Instagram Accounts linked to those pages
-            console.log("Fetching Instagram Accounts...");
+            // Fetch Instagram Accounts
             const igAccounts = [];
             for (const page of finalPages) {
                 try {
@@ -111,9 +125,7 @@ const MetaConnectModal = ({ isOpen, onClose, accessToken, onSave }) => {
                             page_name: page.name
                         });
                     }
-                } catch (e) {
-                    console.error("Error fetching IG for page " + page.id, e);
-                }
+                } catch (e) { }
             }
             setInstagramAccounts(igAccounts);
 
@@ -202,13 +214,37 @@ const MetaConnectModal = ({ isOpen, onClose, accessToken, onSave }) => {
                                 </div>
 
                                 <div>
-                                    <h4 style={{ marginBottom: '10px' }}>💬 Cuentas de WhatsApp Business</h4>
-                                    <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                    <h4 style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        💬 Cuentas de WhatsApp Business
+                                        <button className="btn-sync-small" onClick={() => fetchAssets(selectedBusiness.id)} style={{ fontSize: '0.7rem' }}>🔄 Recargar</button>
+                                    </h4>
+                                    <div style={{ maxHeight: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
                                         {wabas.length === 0 ? (
-                                            <div style={{ padding: '10px', background: 'rgba(255,165,0,0.1)', borderRadius: '8px', border: '1px solid orange' }}>
-                                                <p style={{ margin: 0, fontSize: '0.85rem' }}>No hay cuentas WABA disponibles.</p>
-                                                <p style={{ margin: '5px 0 0 0', fontSize: '0.75rem', opacity: 0.8 }}>
-                                                    💡 Tips: Asegúrate de que el Business Manager seleccionado sea el correcto y de haber otorgado permisos de "WhatsApp Business Management" al conectar.
+                                            <div style={{ padding: '15px', background: 'rgba(245, 158, 11, 0.05)', borderRadius: '12px', border: '1px solid #f59e0b' }}>
+                                                <p style={{ margin: 0, fontSize: '0.85rem', color: '#f59e0b', fontWeight: 600 }}>🔍 No se encontraron cuentas WABA.</p>
+                                                
+                                                <div style={{ marginTop: '15px', padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', fontSize: '0.75rem' }}>
+                                                    <strong>📋 Diagnóstico:</strong>
+                                                    <ul style={{ margin: '5px 0', paddingLeft: '20px', opacity: 0.8 }}>
+                                                        <li>Permisos concedidos: {permissions.length > 0 ? permissions.join(', ') : 'Ninguno'}</li>
+                                                        {permissions.includes('whatsapp_business_management') ? 
+                                                            <li style={{ color: '#4ade80' }}>✅ Permiso WhatsApp detectado.</li> : 
+                                                            <li style={{ color: '#f87171' }}>❌ Falta permiso: whatsapp_business_management</li>
+                                                        }
+                                                    </ul>
+
+                                                    {errorLog.length > 0 && (
+                                                        <div style={{ marginTop: '10px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px' }}>
+                                                            <strong>⚠️ Errores detectados:</strong>
+                                                            <div style={{ maxHeight: '60px', overflowY: 'auto', marginTop: '5px', fontSize: '0.65rem', color: '#f87171' }}>
+                                                                {errorLog.map((err, i) => <div key={i}>• {err}</div>)}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <p style={{ margin: '15px 0 0 0', fontSize: '0.75rem', opacity: 0.8 }}>
+                                                    💡 <strong>Sugerencia:</strong> Si ya tienes una cuenta WABA, asegúrate de haberla seleccionado en la ventana emergente de Meta al conectar.
                                                 </p>
                                             </div>
                                         ) : (

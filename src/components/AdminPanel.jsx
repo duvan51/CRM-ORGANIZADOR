@@ -8,6 +8,7 @@ import MetaConnectModal from "./MetaConnectModal";
 import ConversationsManager from "./ConversationsManager";
 import { initFacebookSDK, loginWithFacebook } from "../utils/facebookSDK";
 import AutomationsKanban from "./AutomationsKanban";
+import WhatsappCampaigns from "./WhatsappCampaigns";
 
 const AdminPanel = ({ token, onBack, userRole }) => {
     console.log("AdminPanel Mount - Role:", userRole);
@@ -27,7 +28,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [clinicId, setClinicId] = useState(null);
 
     // Meta Ads States
-    const [metaConfig, setMetaConfig] = useState({ access_token: '', business_id: '', is_active: true, sync_mode: false });
+    const [metaConfig, setMetaConfig] = useState({ access_token: '', business_id: '', whatsapp_business_account_id: '', whatsapp_phone_number_id: '', is_active: true, sync_mode: false });
     const [savingMeta, setSavingMeta] = useState(false);
     const [metaAccounts, setMetaAccounts] = useState([]);
     const [metaSocialAccounts, setMetaSocialAccounts] = useState([]);
@@ -292,10 +293,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         if (!targetClinicId) return;
 
         try {
-            const { data: mConfig } = await supabase.from('meta_ads_config').select('access_token, business_id, is_active, sync_mode').eq('clinic_id', targetClinicId).maybeSingle();
+            const { data: mConfig } = await supabase.from('meta_ads_config').select('access_token, business_id, whatsapp_business_account_id, whatsapp_phone_number_id, is_active, sync_mode').eq('clinic_id', targetClinicId).maybeSingle();
             if (mConfig) setMetaConfig({
                 access_token: mConfig.access_token || '',
                 business_id: mConfig.business_id || '',
+                whatsapp_business_account_id: mConfig.whatsapp_business_account_id || '',
+                whatsapp_phone_number_id: mConfig.whatsapp_phone_number_id || '',
                 is_active: mConfig.is_active ?? true,
                 sync_mode: mConfig.sync_mode || false
             });
@@ -2153,6 +2156,8 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                 clinic_id: clinicId,
                 access_token: tokenToSave,
                 business_id: metaConfig.business_id,
+                whatsapp_business_account_id: metaConfig.whatsapp_business_account_id,
+                whatsapp_phone_number_id: metaConfig.whatsapp_phone_number_id,
                 is_active: metaConfig.is_active,
                 sync_mode: metaConfig.sync_mode
             }, { onConflict: 'clinic_id' });
@@ -2640,6 +2645,28 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                         value={metaConfig.business_id}
                                         onChange={e => setMetaConfig({ ...metaConfig, business_id: e.target.value })}
                                         placeholder="1234567890..."
+                                        disabled={metaConfig.sync_mode}
+                                        style={{ opacity: metaConfig.sync_mode ? 0.5 : 1 }}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>ID Cuenta WhatsApp Business (WABA)</label>
+                                    <input
+                                        type="text"
+                                        value={metaConfig.whatsapp_business_account_id}
+                                        onChange={e => setMetaConfig({ ...metaConfig, whatsapp_business_account_id: e.target.value })}
+                                        placeholder="ID de la cuenta WABA"
+                                        disabled={metaConfig.sync_mode}
+                                        style={{ opacity: metaConfig.sync_mode ? 0.5 : 1 }}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>ID Número de Teléfono (WhatsApp)</label>
+                                    <input
+                                        type="text"
+                                        value={metaConfig.whatsapp_phone_number_id}
+                                        onChange={e => setMetaConfig({ ...metaConfig, whatsapp_phone_number_id: e.target.value })}
+                                        placeholder="ID del número de teléfono en Meta"
                                         disabled={metaConfig.sync_mode}
                                         style={{ opacity: metaConfig.sync_mode ? 0.5 : 1 }}
                                     />
@@ -3377,6 +3404,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 <span className="sidebar-text">SMS Automatizados</span></button>
                                     <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 <span className="sidebar-text">Email Automatizados</span></button>
                                     <button className={activeView === "whatsapp" ? "active" : ""} onClick={() => setActiveView("whatsapp")}>💬 <span className="sidebar-text">WhatsApp (Whaticket)</span></button>
+                                    <button className={activeView === "whatsapp_campaigns" ? "active" : ""} onClick={() => setActiveView("whatsapp_campaigns")}>🚀 <span className="sidebar-text">Campañas WA</span></button>
                                     <button className={activeView === "ai_agent" ? "active" : ""} onClick={() => setActiveView("ai_agent")}>🤖 <span className="sidebar-text">Agente IA</span></button>
                                     <button className={activeView === "automatizaciones" ? "active" : ""} onClick={() => setActiveView("automatizaciones")}>🔁 <span className="sidebar-text">Automatizaciones (Flujo)</span></button>
                                     <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
@@ -3403,6 +3431,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "sms" && renderSMS()}
                     {activeView === "email" && renderEmail()}
                     {activeView === "whatsapp" && renderWhaticket()}
+                    {activeView === "whatsapp_campaigns" && <WhatsappCampaigns clinicId={clinicId} />}
                     {activeView === "ai_agent" && <AiAgentSection clinicId={clinicId} />}
                     {activeView === "automatizaciones" && <AutomationsKanban clinicId={clinicId} />}
                     {activeView === "meta" && renderMetaConfig()}
