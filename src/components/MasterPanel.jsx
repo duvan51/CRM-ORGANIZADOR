@@ -19,7 +19,8 @@ const MasterPanel = ({ user }) => {
         clinic_name: "",
         email: "",
         password: "",
-        subscription_plan_id: ""
+        subscription_plan_id: "",
+        predictive_credits: 0
     });
     const [viewingClinic, setViewingClinic] = useState(null);
     const [notification, setNotification] = useState(null); // { message, type }
@@ -54,15 +55,15 @@ const MasterPanel = ({ user }) => {
                     clinic_name: newSuperAdmin.clinic_name,
                     role: 'superuser',
                     is_active: true,
-                    subscription_plan_id: newSuperAdmin.subscription_plan_id || null,
-                    clinic_id: authData.user.id // Self-referencing clinic_id for SuperAdmins
+                    clinic_id: authData.user.id, // Self-referencing clinic_id for SuperAdmins
+                    predictive_credits: newSuperAdmin.predictive_credits || 0
                 });
 
                 if (profileError) throw profileError;
 
                 showNotify("SuperAdmin creado exitosamente.");
                 setShowCreateModal(false);
-                setNewSuperAdmin({ name: "", clinic_name: "", email: "", password: "", subscription_plan_id: "" });
+                setNewSuperAdmin({ name: "", clinic_name: "", email: "", password: "", subscription_plan_id: "", predictive_credits: 0 });
                 fetchData();
             }
         } catch (error) {
@@ -83,6 +84,7 @@ const MasterPanel = ({ user }) => {
                     full_name: editingSuperAdmin.full_name,
                     clinic_name: editingSuperAdmin.clinic_name,
                     subscription_plan_id: editingSuperAdmin.subscription_plan_id || null,
+                    predictive_credits: editingSuperAdmin.predictive_credits || 0
                     // We don't update email/password here mostly due to Auth complexity, but role is fixed
                 })
                 .eq('id', editingSuperAdmin.id);
@@ -424,6 +426,17 @@ const MasterPanel = ({ user }) => {
                                 />
                             </div>
 
+                            <div className="form-group">
+                                <label>Créditos Lab Audiencias (IA)</label>
+                                <input
+                                    type="number"
+                                    required
+                                    placeholder="Ej: 50"
+                                    value={newSuperAdmin.predictive_credits}
+                                    onChange={e => setNewSuperAdmin({ ...newSuperAdmin, predictive_credits: parseInt(e.target.value) || 0 })}
+                                />
+                            </div>
+
                             <div className="modal-actions">
                                 <button type="button" className="btn-secondary" onClick={() => setShowCreateModal(false)}>Cancelar</button>
                                 <button type="submit" className="btn-process" disabled={loading}>
@@ -476,6 +489,18 @@ const MasterPanel = ({ user }) => {
                             <div className="form-group">
                                 <label>Email (Solo lectura)</label>
                                 <input type="text" value={editingSuperAdmin.username} readOnly disabled style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }} />
+                            </div>
+
+                            <div className="form-group">
+                                <label style={{ color: 'var(--primary)', fontWeight: 'bold' }}>Créditos Lab Audiencias (IA)</label>
+                                <input
+                                    type="number"
+                                    required
+                                    value={editingSuperAdmin.predictive_credits || 0}
+                                    onChange={e => setEditingSuperAdmin({ ...editingSuperAdmin, predictive_credits: parseInt(e.target.value) || 0 })}
+                                    style={{ border: '1px solid var(--primary)' }}
+                                />
+                                <small className="text-muted">Cantidad actual disponible para simulaciones de IA.</small>
                             </div>
 
                             <div className="form-group" style={{ marginTop: '10px', padding: '15px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px dashed var(--glass-border)' }}>
@@ -550,6 +575,10 @@ const MasterPanel = ({ user }) => {
                                 <span className="status-pill confirmada" style={{ background: 'var(--accent)', marginTop: '5px' }}>
                                     {viewingClinic.plan?.name || "Gratuito"}
                                 </span>
+                            </div>
+                            <div className="detail-field">
+                                <label style={{ display: 'block', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: '5px' }}>Créditos Lab Audiencias</label>
+                                <strong style={{ fontSize: '1.2rem', color: 'var(--accent)' }}>{viewingClinic.predictive_credits || 0}</strong>
                             </div>
                             <div className="detail-field">
                                 <label style={{ display: 'block', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: '5px' }}>Estado de Cuenta</label>

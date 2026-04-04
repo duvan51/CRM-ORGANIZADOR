@@ -8,6 +8,7 @@ import MetaConnectModal from "./MetaConnectModal";
 import ConversationsManager from "./ConversationsManager";
 import { initFacebookSDK, loginWithFacebook } from "../utils/facebookSDK";
 import AutomationsKanban from "./AutomationsKanban";
+import PredictiveMarketing from "./PredictiveMarketing";
 import WhatsappCampaigns from "./WhatsappCampaigns";
 
 const AdminPanel = ({ token, onBack, userRole }) => {
@@ -155,6 +156,10 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     const [passwordData, setPasswordData] = useState({ newPassword: "", confirmPassword: "" });
     const [updatingPassword, setUpdatingPassword] = useState(false);
 
+    // Social Hub States
+    const [socialPlatforms, setSocialPlatforms] = useState([]);
+    const [loadingSocial, setLoadingSocial] = useState(false);
+
     // Confirm Modal State
     const [confirmModal, setConfirmModal] = useState({
         isOpen: false,
@@ -168,7 +173,24 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     useEffect(() => {
         fetchData();
         initFacebookSDK();
-    }, []);
+        if (clinicId) fetchSocialData();
+    }, [clinicId]);
+
+    const fetchSocialData = async () => {
+        if (!clinicId) return;
+        setLoadingSocial(true);
+        try {
+            const { data, error } = await supabase
+                .from('social_platforms')
+                .select('*')
+                .eq('profile_id', clinicId);
+            if (!error) setSocialPlatforms(data || []);
+        } catch (err) {
+            console.error("Error fetching social platforms:", err);
+        } finally {
+            setLoadingSocial(false);
+        }
+    };
 
     useEffect(() => {
         if (clinicId) fetchMetaData();
@@ -3277,6 +3299,104 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         );
     };
 
+    const handleTikTokLogin = () => {
+        const redirectUrl = `https://tlezyskwzbhgdudmbfbn.supabase.co/functions/v1/tiktok-oauth?clinic_id=${clinicId}`;
+        window.location.href = redirectUrl;
+    };
+
+    const renderSocialHubConfig = () => {
+        const tiktok = socialPlatforms.find(p => p.platform_name === 'tiktok');
+        const instagram = metaSocialAccounts.find(p => p.platform === 'instagram');
+        const facebook = metaSocialAccounts.find(p => p.platform === 'messenger');
+
+        return (
+            <div className="admin-section fade-in">
+                <div className="section-header">
+                    <h3>🚀 Social Hub: Conectividad Global</h3>
+                    <p className="text-muted">Vincula tus canales para automatizar publicaciones desde el CRM.</p>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '25px' }}>
+                    {/* TIKTOK CARD */}
+                    <div className="premium-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ fontSize: '2rem' }}>📱</span>
+                                <h4 style={{ margin: 0 }}>TikTok Business</h4>
+                            </div>
+                            <span className={`status-pill ${tiktok ? 'open' : 'closed'}`}>
+                                {tiktok ? 'Conectado' : 'Desconectado'}
+                            </span>
+                        </div>
+                        {tiktok && (
+                            <div style={{ marginBottom: '20px', padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px' }}>
+                                <p style={{ margin: 0, fontWeight: 600 }}>{tiktok.platform_user_name}</p>
+                                <small style={{ opacity: 0.6 }}>ID: {tiktok.platform_user_id}</small>
+                            </div>
+                        )}
+                        <button className="btn-process" style={{ width: '100%' }} onClick={handleTikTokLogin}>
+                            {tiktok ? '🔄 Reconectar TikTok' : '🔗 Conectar TikTok ahora'}
+                        </button>
+                    </div>
+
+                    {/* INSTAGRAM CARD */}
+                    <div className="premium-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ fontSize: '2rem' }}>📸</span>
+                                <h4 style={{ margin: 0 }}>Instagram</h4>
+                            </div>
+                            <span className={`status-pill ${instagram ? 'open' : 'closed'}`}>
+                                {instagram ? 'Conectado' : 'Desconectado'}
+                            </span>
+                        </div>
+                        {instagram ? (
+                            <div style={{ marginBottom: '20px', padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px' }}>
+                                <p style={{ margin: 0, fontWeight: 600 }}>{instagram.name}</p>
+                                <small style={{ opacity: 0.6 }}>IG Business Account</small>
+                            </div>
+                        ) : (
+                            <p style={{ fontSize: '0.8rem', opacity: 0.6, marginBottom: '20px' }}>Conecta Instagram desde la sección "Meta Ads".</p>
+                        )}
+                        <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setActiveView('meta')}>
+                            ⚙️ Ir a Configuración Meta
+                        </button>
+                    </div>
+
+                    {/* FACEBOOK CARD */}
+                    <div className="premium-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ fontSize: '2rem' }}>👤</span>
+                                <h4 style={{ margin: 0 }}>Facebook Page</h4>
+                            </div>
+                            <span className={`status-pill ${facebook ? 'open' : 'closed'}`}>
+                                {facebook ? 'Conectado' : 'Desconectado'}
+                            </span>
+                        </div>
+                        {facebook ? (
+                            <div style={{ marginBottom: '20px', padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px' }}>
+                                <p style={{ margin: 0, fontWeight: 600 }}>{facebook.name}</p>
+                                <small style={{ opacity: 0.6 }}>Página de Facebook</small>
+                            </div>
+                        ) : (
+                            <p style={{ fontSize: '0.8rem', opacity: 0.6, marginBottom: '20px' }}>Conecta Facebook desde la sección "Meta Ads".</p>
+                        )}
+                        <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setActiveView('meta')}>
+                            ⚙️ Ir a Configuración Meta
+                        </button>
+                    </div>
+                </div>
+
+                <div className="info-box" style={{ marginTop: '30px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid var(--primary)', color: 'var(--primary)', padding: '15px' }}>
+                    <p style={{ margin: 0 }}>
+                        💡 <strong>Nota Importante:</strong> El Social Hub utiliza Cloudinary para gestionar tus videos y fotos de manera externa a Supabase, optimizando el rendimiento. Asegúrate de que tus cuentas estén en modo "Business" para habilitar la API de publicación.
+                    </p>
+                </div>
+            </div>
+        );
+    };
+
     const handleUpdateMyPassword = async (e) => {
         e.preventDefault();
         if (passwordData.newPassword !== passwordData.confirmPassword) {
@@ -3404,12 +3524,17 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                     <button className={activeView === "sms" ? "active" : ""} onClick={() => setActiveView("sms")}>📲 <span className="sidebar-text">SMS Automatizados</span></button>
                                     <button className={activeView === "email" ? "active" : ""} onClick={() => setActiveView("email")}>📧 <span className="sidebar-text">Email Automatizados</span></button>
                                     <button className={activeView === "whatsapp" ? "active" : ""} onClick={() => setActiveView("whatsapp")}>💬 <span className="sidebar-text">WhatsApp (Whaticket)</span></button>
-                                    <button className={activeView === "whatsapp_campaigns" ? "active" : ""} onClick={() => setActiveView("whatsapp_campaigns")}>🚀 <span className="sidebar-text">Campañas WA</span></button>
+                                </>
+                            )}
+                            <button className={activeView === "whatsapp_campaigns" ? "active" : ""} onClick={() => setActiveView("whatsapp_campaigns")}>🚀 <span className="sidebar-text">Campañas WA</span></button>
+                            <button className={activeView === "predictive" ? "active" : ""} onClick={() => setActiveView("predictive")}>🧬 <span className="sidebar-text">Lab Audiencias</span></button>
+                            <button className={activeView === "automatizaciones" ? "active" : ""} onClick={() => setActiveView("automatizaciones")}>🔁 <span className="sidebar-text">Automatizaciones (Flujo)</span></button>
+                            {(userRole === "superuser" || userRole === "owner") && (
+                                <>
                                     <button className={activeView === "ai_agent" ? "active" : ""} onClick={() => setActiveView("ai_agent")}>🤖 <span className="sidebar-text">Agente IA</span></button>
-                                    <button className={activeView === "automatizaciones" ? "active" : ""} onClick={() => setActiveView("automatizaciones")}>🔁 <span className="sidebar-text">Automatizaciones (Flujo)</span></button>
                                     <button className={activeView === "meta" ? "active" : ""} onClick={() => setActiveView("meta")}>📱 <span className="sidebar-text">Meta Ads</span></button>
+                                    <button className={activeView === "social_hub_config" ? "active" : ""} onClick={() => setActiveView("social_hub_config")}>🚀 <span className="sidebar-text">Social Hub (Config)</span></button>
                                     <button className={activeView === "zadarma" ? "active" : ""} onClick={() => setActiveView("zadarma")}>☎️ <span className="sidebar-text">Zadarma Llamadas</span></button>
-
                                 </>
                             )}
                             <button className={activeView === "logs" ? "active" : ""} onClick={() => { setActiveView("logs"); fetchGlobalLogs(); }}>📜 <span className="sidebar-text">Monitoreo</span></button>
@@ -3433,8 +3558,10 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                     {activeView === "whatsapp" && renderWhaticket()}
                     {activeView === "whatsapp_campaigns" && <WhatsappCampaigns clinicId={clinicId} />}
                     {activeView === "ai_agent" && <AiAgentSection clinicId={clinicId} />}
+                    {activeView === "predictive" && <PredictiveMarketing clinicId={clinicId} />}
                     {activeView === "automatizaciones" && <AutomationsKanban clinicId={clinicId} />}
                     {activeView === "meta" && renderMetaConfig()}
+                    {activeView === "social_hub_config" && renderSocialHubConfig()}
                     {activeView === "zadarma" && renderZadarma()}
 
                     {activeView === "logs" && renderLogs()}

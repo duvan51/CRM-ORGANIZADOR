@@ -156,7 +156,7 @@ const PatientTracking = ({ user, onScheduleNext }) => {
                             </div>
 
                             <div style={{ marginTop: '15px', display: 'flex', gap: '10px' }}>
-                                <a href={`https://wa.me/${p.info.celular.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="btn-secondary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none', fontSize: '0.8rem', padding: '8px' }}>
+                                <a href={`https://wa.me/${(p.info.celular || '').replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="btn-secondary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none', fontSize: '0.8rem', padding: '8px' }}>
                                     💬 Contactar
                                 </a>
                                 <button

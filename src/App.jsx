@@ -20,6 +20,10 @@ import ResetPasswordForm from "./components/ResetPasswordForm.jsx";
 import MasterPanel from "./components/MasterPanel.jsx";
 import VoiceCall from "./components/VoiceCall.jsx";
 import CrmLeadsBoard from "./components/CrmLeadsBoard.jsx";
+import WhatsappCampaigns from "./components/WhatsappCampaigns.jsx";
+import AutomationsKanban from "./components/AutomationsKanban.jsx";
+import PredictiveMarketing from "./components/PredictiveMarketing.jsx";
+import SocialPublisher from "./components/SocialPublisher.jsx";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div className="field-manager-container">
     <h4 className="field-manager-title">Columnas a unificar:</h4>
@@ -738,6 +742,29 @@ function App() {
                   <span className="tab-icon">💬</span> <span className="tab-text">Chats</span>
                 </div>
               )}
+
+              {(user.role === "superuser" || user.role === "admin") && (
+                <div className={`nav-tab ${activeTab === "marketing" ? "active" : ""}`} onClick={() => setActiveTab("marketing")}>
+                  <span className="tab-icon">🚀</span> <span className="tab-text">Marketing</span>
+                </div>
+              )}
+
+              {(user.role === "superuser" || user.role === "admin") && (
+                <div className={`nav-tab ${activeTab === "automations" ? "active" : ""}`} onClick={() => setActiveTab("automations")}>
+                  <span className="tab-icon">🔁</span> <span className="tab-text">Automatismos</span>
+                </div>
+              )}
+
+              {(user.role === "superuser" || user.role === "admin") && (
+                <div className={`nav-tab ${activeTab === "predictive" ? "active" : ""}`} onClick={() => setActiveTab("predictive")}>
+                  <span className="tab-icon">🧬</span> <span className="tab-text">Lab Audiencias</span>
+                </div>
+              )}
+              {(user.role === "superuser" || user.role === "admin") && (
+                <div className={`nav-tab ${activeTab === "social" ? "active" : ""}`} onClick={() => setActiveTab("social")}>
+                  <span className="tab-icon">📱</span> <span className="tab-text">Social Hub</span>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -790,6 +817,30 @@ function App() {
 
         {activeTab === "chats" && user && (
           <ConversationsManager clinicId={user.clinic_id || user.id} />
+        )}
+
+        {activeTab === "marketing" && user && (
+          <div className="card">
+            <WhatsappCampaigns clinicId={user.clinic_id || user.id} />
+          </div>
+        )}
+
+        {activeTab === "automations" && user && (
+          <div className="card">
+            <AutomationsKanban clinicId={user.clinic_id || user.id} />
+          </div>
+        )}
+
+        {activeTab === "predictive" && user && (
+          <div className="card">
+            <PredictiveMarketing clinicId={user.clinic_id || user.id} />
+          </div>
+        )}
+
+        {activeTab === "social" && user && (
+          <div className="card">
+            <SocialPublisher user={user} clinicId={user.clinic_id || user.id} />
+          </div>
         )}
 
         {activeTab === "agenda" && (
