@@ -86,6 +86,18 @@ function App() {
   const [isPrivacyPolicy, setIsPrivacyPolicy] = useState(window.location.hash === "#privacy-policy");
   const [isTermsOfService, setIsTermsOfService] = useState(window.location.hash === "#terms-of-service");
 
+  // EFECTO PARA RUTAS LEGALES (Hash routes)
+  useEffect(() => {
+    const handleHashChange = () => {
+      setIsResetting(window.location.hash === "#reset-password");
+      setIsDataDeletion(window.location.hash === "#data-deletion");
+      setIsPrivacyPolicy(window.location.hash === "#privacy-policy");
+      setIsTermsOfService(window.location.hash === "#terms-of-service");
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
   useEffect(() => {
     const checkPending = async () => {
       if (!user) return;
@@ -494,18 +506,21 @@ function App() {
       <h1 style={{ textAlign: 'center' }}>Política de Privacidad</h1>
       <div className="card" style={{ marginTop: '30px', padding: '30px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', lineHeight: '1.6' }}>
         <p><strong>Última actualización: {new Date().toLocaleDateString()}</strong></p>
-        <p>Esta Política de Privacidad describe cómo recopilamos, usamos y protegemos su información personal cuando utiliza nuestro CRM y los servicios integrados de Meta (WhatsApp/Ads).</p>
+        <p>Esta Política de Privacidad describe cómo recopilamos, usamos y protegemos su información personal cuando utiliza nuestro CRM y los servicios integrados de Meta (WhatsApp/Ads) junto con la plataforma de TikTok y Cloudinary.</p>
 
         <h3>1. Información que recopilamos</h3>
-        <p>Recopilamos información proporcionada directamente por usted (nombre, email, datos de contacto) y metadatos de las interacciones con sus clientes a través de la API de WhatsApp para facilitar la gestión comercial.</p>
+        <p>Recopilamos información proporcionada directamente por usted (nombre, email, datos de contacto) y metadatos de las interacciones con sus clientes a través de la API de WhatsApp y TikTok para facilitar la gestión comercial y publicación de contenidos.</p>
 
         <h3>2. Uso de la información</h3>
-        <p>Utilizamos sus datos únicamente para la operación técnica del CRM, el seguimiento de citas médicas y la provisión de respuestas automatizadas mediante nuestra IA integrada.</p>
+        <p>Utilizamos sus datos únicamente para la operación técnica del CRM, el seguimiento de citas médicas, la provisión de respuestas automatizadas mediante nuestra IA integrada y la programación de videos en redes sociales.</p>
 
-        <h3>3. Integración con Meta</h3>
-        <p>Nuestra aplicación utiliza las APIs de Meta. Solo accedemos a la información necesaria para gestionar sus campañas de Ads y mensajes de WhatsApp. No vendemos sus datos a terceros.</p>
+        <h3>3. Integración con Meta y TikTok</h3>
+        <p>Nuestra aplicación utiliza las APIs de Meta y TikTok Business. Solo accedemos a la información necesaria para gestionar sus campañas de Ads, mensajes de WhatsApp y publicación de videos automatizados. No vendemos sus datos a terceros.</p>
 
-        <h3>4. Sus derechos</h3>
+        <h3>4. Procesamiento Multimedia</h3>
+        <p>Utilizamos Cloudinary para el procesamiento y almacenamiento optimizado de activos multimedia (videos/fotos) publicados de forma automatizada por el CRM.</p>
+
+        <h3>5. Sus derechos</h3>
         <p>Usted puede solicitar el acceso, rectificación o eliminación de sus datos en cualquier momento a través de nuestro canal de soporte técnico.</p>
       </div>
       <div style={{ textAlign: 'center', marginTop: '30px' }}>
