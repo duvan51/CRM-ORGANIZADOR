@@ -82,7 +82,7 @@ serve(async (req) => {
         if (upsertError) throw upsertError;
 
         // 5. Redirigir de vuelta al CRM
-        const baseCrmUrl = "https://desarrollandoando.fun"; 
+        const baseCrmUrl = "https://andocrm.cloud"; 
         return Response.redirect(`${baseCrmUrl}/#social?status=success&platform=tiktok`, 302);
 
     } catch (err: any) {

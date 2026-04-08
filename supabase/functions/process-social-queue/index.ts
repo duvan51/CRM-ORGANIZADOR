@@ -93,28 +93,76 @@ serve(async (req) => {
 // --- HELPERS DE PUBLICACIÓN ---
 
 async function publishToTikTok(token: string, post: any) {
-    const res = await fetch("https://open.tiktokapis.com/v2/post/publish/video/init/", {
+    // 1. Obtener el archivo desde Cloudinary para saber el tamaño y tener los bytes
+    const mediaResp = await fetch(post.cloudinary_url);
+    if (!mediaResp.ok) throw new Error("No se pudo descargar el video de Cloudinary");
+    const videoBlob = await mediaResp.blob();
+    const videoSize = videoBlob.size;
+
+    // 2. Inicializar la subida en TikTok (Modo FILE_UPLOAD)
+    // Nota: El video_size es obligatorio para FILE_UPLOAD
+    const initResp = await fetch("https://open.tiktokapis.com/v2/post/publish/video/init/", {
         method: "POST",
-        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { 
+            "Authorization": `Bearer ${token}`, 
+            "Content-Type": "application/json" 
+        },
         body: JSON.stringify({
-            post_info: { title: post.caption?.substring(0, 80), description: post.caption, privacy_level: "PUBLIC_TO_EVERYONE" },
-            source: "PULL_FROM_URL",
-            video_url: post.cloudinary_url
+            post_info: { 
+                title: post.caption?.substring(0, 80) || "Video from CRM", 
+                description: post.caption || "",
+                privacy_level: "PUBLIC_TO_EVERYONE",
+                disable_comment: false,
+                disable_duet: false,
+                disable_stitch: false
+            },
+            source: "FILE_UPLOAD",
+            video_size: videoSize,
+            chunk_size: videoSize,
+            total_chunk_count: 1
         })
     });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
+
+    const initData = await initResp.json();
+    if (initData.error) {
+        console.error("TikTok Init Error:", initData.error);
+        throw new Error(`TikTok Init: ${initData.error.message}`);
+    }
+
+    const { upload_url } = initData.data;
+
+    // 3. Subir los bytes directamente a la upload_url proporcionada por TikTok
+    const uploadResp = await fetch(upload_url, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "video/mp4",
+            "Content-Length": videoSize.toString(),
+            "Content-Range": `bytes 0-${videoSize - 1}/${videoSize}`
+        },
+        body: videoBlob
+    });
+
+    if (!uploadResp.ok) {
+        const uploadErr = await uploadResp.text();
+        console.error("TikTok Upload Binary Error:", uploadErr);
+        throw new Error("TikTok: Error al subir los bytes del video.");
+    }
+
+    // TikTok no requiere una llamada de 'commit' si se sube en un solo chunk pequeño,
+    // pero el proceso de revisión comenzará automáticamente.
 }
 
 async function publishToInstagram(token: string, igId: string, post: any) {
     const isVideo = post.cloudinary_url.includes('.mp4');
+    const igType = post.metadata?.instagram?.type || (isVideo ? 'reel' : 'feed');
+    
     const container = await fetch(`https://graph.facebook.com/v18.0/${igId}/media`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            [isVideo ? 'video_url' : 'image_url']: post.cloudinary_url,
+            [igType === 'feed' && !isVideo ? 'image_url' : 'video_url']: post.cloudinary_url,
             caption: post.caption,
-            media_type: isVideo ? 'REELS' : 'IMAGE',
+            media_type: igType === 'reel' ? 'REELS' : (isVideo ? 'VIDEO' : 'IMAGE'),
             access_token: token
         })
     }).then(r => r.json());
@@ -122,7 +170,7 @@ async function publishToInstagram(token: string, igId: string, post: any) {
     if (container.error) throw new Error(container.error.message);
     
     // Publicar (Instagram requiere un pequeño delay para procesar si es video)
-    if (isVideo) await new Promise(r => setTimeout(r, 10000));
+    if (isVideo || igType === 'reel') await new Promise(r => setTimeout(r, 15000));
     
     const publish = await fetch(`https://graph.facebook.com/v18.0/${igId}/media_publish`, {
         method: "POST",
@@ -135,15 +183,33 @@ async function publishToInstagram(token: string, igId: string, post: any) {
 
 async function publishToFacebook(token: string, pageId: string, post: any) {
     const isVideo = post.cloudinary_url.includes('.mp4');
-    const endpoint = isVideo ? `/${pageId}/videos` : `/${pageId}/photos`;
-    const res = await fetch(`https://graph.facebook.com/v18.0${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            [isVideo ? 'file_url' : 'url']: post.cloudinary_url,
-            message: post.caption,
-            access_token: token
-        })
-    }).then(r => r.json());
-    if (res.error) throw new Error(res.error.message);
+    const fbType = post.metadata?.facebook?.type || 'feed';
+    const fbTitle = post.metadata?.facebook?.title || "";
+
+    if (fbType === 'reel' && isVideo) {
+        // Facebook Reels API (Simplified for standard Graph API Reels endpoint)
+        const res = await fetch(`https://graph.facebook.com/v18.0/${pageId}/video_reels`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                video_url: post.cloudinary_url,
+                description: post.caption,
+                access_token: token
+            })
+        }).then(r => r.json());
+        if (res.error) throw new Error(res.error.message);
+    } else {
+        const endpoint = isVideo ? `/${pageId}/videos` : `/${pageId}/photos`;
+        const res = await fetch(`https://graph.facebook.com/v18.0${endpoint}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                [isVideo ? 'file_url' : 'url']: post.cloudinary_url,
+                [isVideo ? 'description' : 'message']: post.caption,
+                title: isVideo ? fbTitle : undefined,
+                access_token: token
+            })
+        }).then(r => r.json());
+        if (res.error) throw new Error(res.error.message);
+    }
 }

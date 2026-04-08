@@ -2308,11 +2308,13 @@ const AdminPanel = ({ token, onBack, userRole }) => {
             fetchMetaData();
 
             for (const ig of instagrams) {
+                const parentPage = pages.find(p => p.id === ig.page_id);
                 const { error: igError } = await supabase.from('meta_social_accounts').upsert({
                     clinic_id: clinicId,
                     account_id: ig.id,
                     name: ig.username || ig.name,
                     platform: 'instagram',
+                    access_token: parentPage?.access_token || tempMetaToken,
                     is_active: true
                 }, { onConflict: 'clinic_id,account_id,platform' });
                 if (igError) console.error("Error guardando instagram:", igError);
