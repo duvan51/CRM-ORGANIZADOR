@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../supabase';
 
-const SocialPublisher = ({ user, clinicId }) => {
+const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
     const [caption, setCaption] = useState('');
     const [scheduledAt, setScheduledAt] = useState('');
     const [selectedPlatforms, setSelectedPlatforms] = useState(['tiktok', 'instagram']);
@@ -11,6 +11,7 @@ const SocialPublisher = ({ user, clinicId }) => {
     const [posts, setPosts] = useState([]);
     const [connectedPlatforms, setConnectedPlatforms] = useState([]);
     const [editingPostId, setEditingPostId] = useState(null);
+    const [successMessage, setSuccessMessage] = useState('');
 
     // Platform specific configurations
     const [platformConfigs, setPlatformConfigs] = useState({
@@ -20,7 +21,7 @@ const SocialPublisher = ({ user, clinicId }) => {
     });
 
     // View, Date & Filters
-    const [viewMode, setViewMode] = useState('calendar'); // 'list' or 'calendar'
+    const [viewMode, setViewMode] = useState('calendar'); // 'list', 'calendar' or 'weekly'
     const [viewDate, setViewDate] = useState(new Date());
     const [statusFilter, setStatusFilter] = useState('all');
     const [platformFilter, setPlatformFilter] = useState('all');
@@ -37,6 +38,7 @@ const SocialPublisher = ({ user, clinicId }) => {
     const folder = "CRM_ANDO";
 
     const [showGallery, setShowGallery] = useState(false);
+    const [showAccountManager, setShowAccountManager] = useState(false);
 
     useEffect(() => {
         fetchPosts();
@@ -49,7 +51,7 @@ const SocialPublisher = ({ user, clinicId }) => {
             script.async = true;
             document.body.appendChild(script);
         }
-    }, [clinicId]);
+    }, [clinicId, activeAgenda]);
 
     const getUniqueMedia = () => {
         const urls = posts.map(p => p.cloudinary_url).filter(Boolean);
@@ -58,22 +60,58 @@ const SocialPublisher = ({ user, clinicId }) => {
 
     const fetchPosts = async () => {
         if (!clinicId) return;
-        const { data, error } = await supabase
+        let query = supabase
             .from('social_posts')
             .select('*')
-            .eq('profile_id', clinicId)
             .order('scheduled_at', { ascending: false });
+
+        if (activeAgenda && activeAgenda !== 'all') {
+            query = query.eq('agenda_id', activeAgenda.id);
+        } else if (allAgendas && allAgendas.length > 0) {
+            query = query.in('agenda_id', allAgendas.map(a => a.id));
+        } else {
+            query = query.eq('profile_id', clinicId);
+        }
+
+        const { data, error } = await query;
         if (!error) setPosts(data);
     };
 
     const fetchConnectedPlatforms = async () => {
         if (!clinicId) return;
         try {
-            const { data: tiktokData } = await supabase.from('social_platforms').select('*').eq('profile_id', clinicId);
-            const { data: metaData } = await supabase.from('meta_social_accounts').select('*').eq('clinic_id', clinicId).eq('is_active', true);
+            let tiktokQuery = supabase.from('social_platforms').select('*');
+            let metaQuery = supabase.from('meta_social_accounts').select('*').eq('is_active', true);
+
+            if (activeAgenda && activeAgenda !== 'all') {
+                tiktokQuery = tiktokQuery.eq('agenda_id', activeAgenda.id);
+                metaQuery = metaQuery.eq('agenda_id', activeAgenda.id);
+            } else if (allAgendas && allAgendas.length > 0) {
+                const agendaIds = allAgendas.map(a => a.id);
+                tiktokQuery = tiktokQuery.in('agenda_id', agendaIds);
+                // meta_social_accounts might use clinic_id, check if it has agenda_id
+                metaQuery = metaQuery.eq('clinic_id', clinicId);
+            } else {
+                tiktokQuery = tiktokQuery.eq('profile_id', clinicId);
+                metaQuery = metaQuery.eq('clinic_id', clinicId);
+            }
+
+            const { data: tiktokData } = await tiktokQuery;
+            const { data: metaData } = await metaQuery;
+
             const combined = [
-                ...(tiktokData || []).map(p => ({ platform: 'tiktok', user_name: p.platform_user_name || 'TikTok User' })),
-                ...(metaData || []).map(p => ({ platform: p.platform === 'messenger' ? 'facebook' : p.platform, user_name: p.name || 'Meta Page' }))
+                ...(tiktokData || []).map(p => ({ 
+                    id: p.id,
+                    platform: 'tiktok', 
+                    user_name: p.platform_user_name || 'TikTok User',
+                    agenda_id: p.agenda_id 
+                })),
+                ...(metaData || []).map(p => ({ 
+                    id: p.id,
+                    platform: p.platform === 'messenger' ? 'facebook' : p.platform, 
+                    user_name: p.name || 'Meta Page',
+                    agenda_id: p.agenda_id 
+                }))
             ];
             setConnectedPlatforms(combined);
         } catch (err) { console.error(err); }
@@ -102,6 +140,7 @@ const SocialPublisher = ({ user, clinicId }) => {
             const finalScheduledAt = isImmediate ? new Date().toISOString() : new Date(scheduledAt).toISOString();
             const payload = {
                 profile_id: clinicId,
+                agenda_id: activeAgenda && activeAgenda !== 'all' ? activeAgenda.id : (allAgendas?.[0]?.id || null),
                 cloudinary_url: mediaUrl,
                 caption,
                 scheduled_at: finalScheduledAt,
@@ -115,6 +154,8 @@ const SocialPublisher = ({ user, clinicId }) => {
                 if (isImmediate) supabase.functions.invoke('process-social-queue').catch(() => {});
             }
             setCaption(''); setScheduledAt(''); setMediaUrl(''); setEditingPostId(null); fetchPosts();
+            setSuccessMessage(isImmediate ? '🚀 Publicación lanzada con éxito!' : '📅 Publicación programada correctamente!');
+            setTimeout(() => setSuccessMessage(''), 5000);
         } catch (err) { alert(err.message); } finally { setLoading(false); }
     };
 
@@ -139,9 +180,120 @@ const SocialPublisher = ({ user, clinicId }) => {
         setPlatformConfigs(prev => ({ ...prev, [plat]: { ...prev[plat], [key]: val } }));
     };
 
+    const handleUpdateAccountAgenda = async (platform, accountId, agendaId) => {
+        try {
+            const table = platform === 'tiktok' ? 'social_platforms' : 'meta_social_accounts';
+            // Note: meta_social_accounts uses id, social_platforms uses id.
+            const { error } = await supabase.from(table).update({ agenda_id: agendaId }).eq('id', accountId);
+            if (error) throw error;
+            fetchConnectedPlatforms();
+        } catch (err) { alert(err.message); }
+    };
+
+    const AccountManager = () => {
+        return (
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+                <div style={{ background: 'var(--card-bg)', backdropFilter: 'blur(10px)', border: '1px solid var(--glass-border)', borderRadius: '25px', width: '100%', maxWidth: '600px', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ padding: '20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h2 style={{ fontSize: '1.2rem', fontWeight: 900 }}>⚙️ Gestionar Canales</h2>
+                        <button onClick={() => setShowAccountManager(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: 'var(--text-main)' }}>×</button>
+                    </div>
+                    <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
+                        <p style={{ fontSize: '0.8rem', opacity: 0.6, marginBottom: '20px' }}>Asigna cada cuenta conectada a una sede específica para organizar tu contenido correctamente.</p>
+                        
+                        {connectedPlatforms.length === 0 && <div style={{ textAlign: 'center', padding: '40px', opacity: 0.5 }}>No hay cuentas conectadas aún.</div>}
+
+                        {connectedPlatforms.map(conn => (
+                            <div key={`${conn.platform}-${conn.id}`} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '15px', padding: '15px', marginBottom: '10px', border: '1px solid var(--glass-border)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <div style={{ fontSize: '1.5rem' }}>{getPlatformIcon(conn.platform)}</div>
+                                        <div>
+                                            <div style={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem' }}>{conn.platform}</div>
+                                            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{conn.user_name}</div>
+                                        </div>
+                                    </div>
+                                    <div style={{ fontSize: '0.5rem', background: '#4ade80', color: '#fff', padding: '2px 6px', borderRadius: '5px' }}>CONECTADO</div>
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                    <label style={{ fontSize: '0.65rem', fontWeight: 800, opacity: 0.5 }}>ASIGNAR A SEDE:</label>
+                                    <select 
+                                        value={conn.agenda_id || ''} 
+                                        onChange={(e) => handleUpdateAccountAgenda(conn.platform, conn.id, e.target.value || null)}
+                                        style={{ width: '100%', padding: '10px', borderRadius: '10px', background: 'rgba(0,0,0,0.2)', color: 'inherit', border: '1px solid var(--glass-border)', fontSize: '0.8rem' }}
+                                    >
+                                        <option value="">(Sin asignar / Global)</option>
+                                        {allAgendas?.map(a => (
+                                            <option key={a.id} value={a.id}>{a.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div style={{ padding: '20px', borderTop: '1px solid var(--glass-border)', textAlign: 'center' }}>
+                        <button onClick={() => setShowAccountManager(false)} style={{ width: '100%', padding: '12px', borderRadius: '12px', background: 'var(--primary)', color: '#fff', border: 'none', fontWeight: 900, cursor: 'pointer' }}>Hecho</button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const getPlatformIcon = (p) => p === 'tiktok' ? '📱' : p === 'instagram' ? '📸' : '👤';
 
-    // FILTERING LOGIC
+    const getStatusColor = (status, isDark) => {
+        if (status === 'published' || status === 'partially_published') {
+            return isDark ? '#4ade80' : '#22c55e';
+        }
+        if (status === 'failed') {
+            return isDark ? '#f87171' : '#ef4444';
+        }
+        // Pending / Processing / Others
+        return isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.4)';
+    };
+
+    const ControlBar = () => (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <h3 style={{ textTransform: 'capitalize', margin: 0 }}>
+                    {viewMode === 'calendar' ? `🗓️ ${new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(viewDate)}` : 
+                     viewMode === 'weekly' ? `📅 Semana ${new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short' }).format(new Date(viewDate.getTime() - viewDate.getDay() * 86400000))} - ${new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short' }).format(new Date(viewDate.getTime() + (6 - viewDate.getDay()) * 86400000))}` : 
+                     '📋 Lista de Publicaciones'}
+                </h3>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: '10px', borderRadius: '12px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                    <option value="all">Todos los Estados</option>
+                    <option value="published">Publicados</option>
+                    <option value="pending">Programados</option>
+                    <option value="failed">Fallidos</option>
+                </select>
+                <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ padding: '10px', borderRadius: '12px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                    <option value="all">Todas las Redes</option>
+                    <option value="tiktok">TikTok</option>
+                    <option value="instagram">Instagram</option>
+                    <option value="facebook">Facebook</option>
+                </select>
+                <button onClick={() => setShowAccountManager(true)} style={{ padding: '10px 15px', borderRadius: '12px', background: 'rgba(255,255,255,0.1)', border: '1px solid var(--glass-border)', color: 'var(--text-main)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 700 }}>
+                    ⚙️ Config
+                </button>
+                <div style={{ width: '1px', background: 'var(--glass-border)', margin: '0 5px' }} />
+                {viewMode === 'calendar' && (
+                    <>
+                        <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} style={{ padding: '5px 15px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.05)', color: 'var(--text-main)', cursor: 'pointer' }}>◀ Ant</button>
+                        <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} style={{ padding: '5px 15px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.05)', color: 'var(--text-main)', cursor: 'pointer' }}>Sig ▶</button>
+                    </>
+                )}
+                {viewMode === 'weekly' && (
+                    <>
+                        <button onClick={() => setViewDate(new Date(viewDate.getTime() - 7 * 86400000))} style={{ padding: '5px 15px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.05)', color: 'var(--text-main)', cursor: 'pointer' }}>◀ Ant</button>
+                        <button onClick={() => setViewDate(new Date(viewDate.getTime() + 7 * 86400000))} style={{ padding: '5px 15px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.05)', color: 'var(--text-main)', cursor: 'pointer' }}>Sig ▶</button>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+
     const filteredPosts = posts.filter(p => {
         const matchesStatus = statusFilter === 'all' 
             || (statusFilter === 'published' && (p.status === 'published' || p.status === 'partially_published'))
@@ -151,7 +303,16 @@ const SocialPublisher = ({ user, clinicId }) => {
         return matchesStatus && matchesPlatform;
     });
 
-    const CalendarView = () => {
+    const handleDaySelection = (day, month, year) => {
+        const selected = new Date(year, month, day);
+        // Pre-fill with selected date and current time (rounded to next hour)
+        const now = new Date();
+        selected.setHours(now.getHours() + 1, 0, 0, 0);
+        setScheduledAt(selected.toISOString().slice(0, 16));
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const MonthView = () => {
         const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
         const firstDay = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
         const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Juv', 'Vie', 'Sáb'];
@@ -162,14 +323,8 @@ const SocialPublisher = ({ user, clinicId }) => {
 
         return (
             <div style={{ width: '100%' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                    <h3 style={{ textTransform: 'capitalize' }}>🗓️ {monthName}</h3>
-                    <div style={{ display: 'flex', gap: '10px' }}>
-                        <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} style={{ padding: '5px 15px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.05)', color: 'var(--text-main)', cursor: 'pointer' }}>◀ Ant</button>
-                        <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} style={{ padding: '5px 15px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.05)', color: 'var(--text-main)', cursor: 'pointer' }}>Sig ▶</button>
-                    </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px' }}>
+                <ControlBar />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '10px' }}>
                     {dayNames.map(d => <div key={d} style={{ textAlign: 'center', fontWeight: 800, fontSize: '0.8rem', opacity: 0.5 }}>{d}</div>)}
                     {calendarDays.map((day, idx) => {
                         const dayPosts = filteredPosts.filter(p => {
@@ -177,14 +332,63 @@ const SocialPublisher = ({ user, clinicId }) => {
                             return day && d.getDate() === day && d.getMonth() === viewDate.getMonth() && d.getFullYear() === viewDate.getFullYear();
                         });
                         return (
-                            <div key={idx} style={{ minHeight: '120px', background: day ? 'rgba(255,255,255,0.02)' : 'transparent', border: day ? '1px solid var(--glass-border)' : 'none', borderRadius: '12px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                            <div key={idx} style={{ minHeight: '120px', background: day ? 'rgba(255,255,255,0.02)' : 'transparent', border: day ? '1px solid var(--glass-border)' : 'none', borderRadius: '12px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '5px', overflow: 'hidden' }}>
                                 {day && <span style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.3 }}>{day}</span>}
-                                {dayPosts.map(p => (
-                                    <div key={p.id} onClick={() => setViewingPost(p)} style={{ background: 'var(--primary)', color: '#fff', borderRadius: '6px', padding: '4px 6px', fontSize: '0.6rem', cursor: 'pointer', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', display: 'flex', gap: '4px', alignItems: 'center' }}>
-                                        {p.platforms?.map(plat => <span key={plat}>{getPlatformIcon(plat)}</span>)}
-                                        {p.caption?.substring(0, 10)}
-                                    </div>
-                                ))}
+                                <div onClick={(e) => { e.stopPropagation(); if (day) handleDaySelection(day, viewDate.getMonth(), viewDate.getFullYear()); }} style={{ flex: 1, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '5px', overflow: 'hidden' }}>
+                                    {dayPosts.map(p => (
+                                        <div key={p.id} onClick={(e) => { e.stopPropagation(); setViewingPost(p); }} style={{ background: getStatusColor(p.status, isDark), color: '#fff', borderRadius: '6px', padding: '4px 6px', fontSize: '0.6rem', cursor: 'pointer', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', display: 'flex', gap: '4px', alignItems: 'center', width: '100%' }}>
+                                            <div style={{ display: 'flex', gap: '4px', overflow: 'hidden' }}>{p.platforms?.map(plat => <span key={plat}>{getPlatformIcon(plat)}</span>)}</div>
+                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.caption?.substring(0, 10)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
+
+    const WeeklyView = () => {
+        const startOfWeek = new Date(viewDate);
+        const day = viewDate.getDay();
+        startOfWeek.setDate(viewDate.getDate() - (day === 0 ? 6 : day - 1)); // Start on Monday
+
+        const weekDays = [];
+        for (let i = 0; i < 7; i++) {
+            const date = new Date(startOfWeek);
+            date.setDate(startOfWeek.getDate() + i);
+            weekDays.push(date);
+        }
+
+        const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+
+        return (
+            <div style={{ width: '100%' }}>
+                <ControlBar />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '10px' }}>
+                    {weekDays.map((date, idx) => {
+                        const dateStr = date.toISOString().split('T')[0];
+                        const dayPosts = filteredPosts.filter(p => new Date(p.scheduled_at).toISOString().split('T')[0] === dateStr);
+                        const isToday = new Date().toISOString().split('T')[0] === dateStr;
+
+                        return (
+                            <div key={idx} style={{ minHeight: '300px', background: isToday ? 'rgba(99, 102, 241, 0.05)' : 'rgba(255,255,255,0.02)', border: isToday ? '1px solid var(--primary)' : '1px solid var(--glass-border)', borderRadius: '15px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '10px', overflow: 'hidden' }}>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: '0.7rem', fontWeight: 800, opacity: 0.5, textTransform: 'uppercase' }}>{dayNames[idx]}</div>
+                                    <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{date.getDate()}</div>
+                                </div>
+                                <div onClick={() => handleDaySelection(date.getDate(), date.getMonth(), date.getFullYear())} style={{ flex: 1, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'hidden' }}>
+                                    {dayPosts.map(p => (
+                                        <div key={p.id} onClick={(e) => { e.stopPropagation(); setViewingPost(p); }} style={{ background: getStatusColor(p.status, isDark), color: '#fff', borderRadius: '10px', padding: '8px', fontSize: '0.7rem', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.1)', overflow: 'hidden', width: '100%' }}>
+                                            <div style={{ display: 'flex', gap: '4px', marginBottom: '4px', overflow: 'hidden' }}>{p.platforms?.map(plat => <span key={plat}>{getPlatformIcon(plat)}</span>)}</div>
+                                            <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>{p.caption || '(Sin texto)'}</div>
+                                            <div style={{ fontSize: '0.6rem', opacity: 0.8, marginTop: '2px' }}>🕒 {new Date(p.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                        </div>
+                                    ))}
+                                    <div style={{ marginTop: 'auto', textAlign: 'center', opacity: 0.2, fontSize: '1.5rem' }}>+</div>
+                                </div>
                             </div>
                         );
                     })}
@@ -207,7 +411,7 @@ const SocialPublisher = ({ user, clinicId }) => {
                             <button onClick={() => setShowGallery(false)} style={{ background: '#FF4757', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800, fontSize: '0.8rem', boxShadow: '0 5px 15px rgba(255, 71, 87, 0.2)' }}>Cerrar Galería ✕</button>
                         </div>
                         <div style={{ flex: 1, overflowY: 'auto', padding: '30px 40px' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '20px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
                                 {getUniqueMedia().map((url, i) => (
                                     <div key={i} style={{ position: 'relative', borderRadius: '15px', overflow: 'hidden', background: isDark ? '#000' : '#f1f5f9', cursor: 'pointer', height: '180px', boxShadow: `0 10px 20px ${isDark ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.05)'}`, transition: 'all 0.3s' }} onClick={() => { setMediaUrl(url); setShowGallery(false); }}>
                                         {url.includes('.mp4') ? (
@@ -259,11 +463,17 @@ const SocialPublisher = ({ user, clinicId }) => {
                             <div style={{ marginBottom: '30px' }}>
                                 <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: 900, opacity: 0.3, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', color: isDark ? '#fff' : '#1e293b' }}>Canales Activos</label>
                                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                    {viewingPost.platforms?.map(plat => (
-                                        <div key={plat} style={{ padding: '10px 18px', background: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 800, border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`, color: isDark ? '#fff' : '#334155' }}>
-                                            {getPlatformIcon(plat)} {plat.toUpperCase()}
-                                        </div>
-                                    ))}
+                                    {viewingPost.platforms?.map(plat => {
+                                        const conn = connectedPlatforms.find(c => c.platform === plat);
+                                        return (
+                                            <div key={plat} style={{ padding: '10px 18px', background: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.8rem', fontWeight: 800, border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`, color: isDark ? '#fff' : '#334155' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    {getPlatformIcon(plat)} {plat.toUpperCase()}
+                                                </div>
+                                                {conn && <div style={{ fontSize: '0.65rem', opacity: 0.5, fontWeight: 600 }}>👤 {conn.user_name}</div>}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
 
@@ -306,7 +516,12 @@ const SocialPublisher = ({ user, clinicId }) => {
             
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '30px', marginTop: '30px' }}>
                 {/* EDITOR */}
-                <div className="glass-panel" style={{ padding: '25px' }}>
+                <div className="glass-panel" style={{ padding: '25px', position: 'relative' }}>
+                    {successMessage && (
+                        <div style={{ position: 'absolute', top: '10px', left: '10px', right: '10px', padding: '10px', background: '#4ade80', color: '#fff', borderRadius: '10px', textAlign: 'center', fontSize: '0.8rem', fontWeight: 800, zIndex: 10, animation: 'fadeInDown 0.3s' }}>
+                            {successMessage}
+                        </div>
+                    )}
                     <h3>🆕 Crear Publicación</h3>
                     <div style={{ marginBottom: '20px', marginTop: '15px' }}>
                         <label style={{ display: 'block', marginBottom: '10px', fontWeight: 700 }}>1. Multimedia</label>
@@ -331,11 +546,43 @@ const SocialPublisher = ({ user, clinicId }) => {
                     
                     <div style={{ marginBottom: '15px' }}>
                         <label style={{ display: 'block', marginBottom: '8px', fontWeight: 700, fontSize: '0.8rem' }}>Canales Seleccionados</label>
-                        <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                             {['tiktok', 'instagram', 'facebook'].map(p => {
                                 const isSelected = selectedPlatforms.includes(p);
                                 const connected = connectedPlatforms.find(cp => cp.platform === p);
-                                return <button key={p} onClick={() => connected && setSelectedPlatforms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])} style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: isSelected ? 'var(--primary)' : 'rgba(0,0,0,0.05)', color: isSelected ? '#fff' : 'var(--text-main)', opacity: connected ? 1 : 0.3, fontSize: '0.75rem', fontWeight: 700 }}>{getPlatformIcon(p)} {p}</button>
+                                return (
+                                    <button 
+                                        key={p} 
+                                        onClick={() => connected && setSelectedPlatforms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])} 
+                                        style={{ 
+                                            flex: 1, 
+                                            minWidth: '100px',
+                                            padding: '10px 8px', 
+                                            borderRadius: '12px', 
+                                            border: '1px solid var(--glass-border)', 
+                                            background: isSelected ? 'var(--primary)' : 'rgba(0,0,0,0.05)', 
+                                            color: isSelected ? '#fff' : 'var(--text-main)', 
+                                            opacity: connected ? 1 : 0.3, 
+                                            fontSize: '0.7rem', 
+                                            fontWeight: 700,
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            cursor: connected ? 'pointer' : 'not-allowed',
+                                            transition: '0.2s'
+                                        }}
+                                    >
+                                        <div style={{ fontSize: '1.2rem' }}>{getPlatformIcon(p)}</div>
+                                        <div style={{ fontWeight: 800 }}>{p.toUpperCase()}</div>
+                                        {connected && (
+                                            <div style={{ fontSize: '0.55rem', opacity: isSelected ? 0.9 : 0.5, fontWeight: 600, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                👤 {connected.user_name}
+                                            </div>
+                                        )}
+                                        {!connected && <div style={{ fontSize: '0.5rem', opacity: 0.5 }}>No conectado</div>}
+                                    </button>
+                                );
                             })}
                         </div>
                     </div>
@@ -363,8 +610,37 @@ const SocialPublisher = ({ user, clinicId }) => {
                             </div>
                         )}
                     </div>
-                    <input type="datetime-local" className="custom-file-input" style={{ width: '100%', marginBottom: '15px', height: '35px', fontSize: '0.75rem' }} value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} />
-                    <button className="btn-process" style={{ width: '100%', padding: '12px', fontSize: '0.9rem' }} onClick={() => handleSchedule(true)} disabled={loading}>🚀 Publicar Ahora</button>
+                    <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(255,255,255,0.03)', borderRadius: '15px', border: '1px solid var(--glass-border)' }}>
+                        <label style={{ display: 'block', marginBottom: '10px', fontWeight: 700, fontSize: '0.8rem', color: 'var(--primary)' }}>📅 Programar Lanzamiento</label>
+                        <input 
+                            type="datetime-local" 
+                            className="custom-file-input" 
+                            style={{ width: '100%', marginBottom: '15px', height: '40px', fontSize: '0.85rem', borderRadius: '10px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.1)', color: 'inherit', padding: '0 10px' }} 
+                            value={scheduledAt} 
+                            onChange={e => setScheduledAt(e.target.value)} 
+                        />
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                            <button 
+                                className="btn-process" 
+                                style={{ padding: '12px', fontSize: '0.85rem', background: 'rgba(255,255,255,0.05)', color: 'var(--text-main)', border: '1px solid var(--glass-border)', borderRadius: '10px', cursor: 'pointer', fontWeight: 700, transition: 'all 0.2s' }} 
+                                onClick={() => handleSchedule(false)} 
+                                disabled={loading}
+                                onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
+                                onMouseLeave={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
+                            >
+                                ⏳ Agendar
+                            </button>
+                            <button 
+                                className="btn-process" 
+                                style={{ padding: '12px', fontSize: '0.85rem', borderRadius: '10px', cursor: 'pointer', fontWeight: 700, boxShadow: '0 4px 15px rgba(99, 102, 241, 0.3)' }} 
+                                onClick={() => handleSchedule(true)} 
+                                disabled={loading}
+                            >
+                                🚀 Publicar Ya
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column' }}>
@@ -435,44 +711,40 @@ const SocialPublisher = ({ user, clinicId }) => {
                         <h2 style={{ margin: 0 }}>📅 Planificación de Contenido</h2>
                         <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
                             <div style={{ display: 'flex', background: 'rgba(0,0,0,0.05)', padding: '4px', borderRadius: '10px' }}>
-                                <button onClick={() => setViewMode('calendar')} style={{ padding: '6px 15px', borderRadius: '8px', border: 'none', background: viewMode === 'calendar' ? 'var(--primary)' : 'transparent', color: viewMode === 'calendar' ? '#fff' : 'var(--text-main)', fontSize: '0.8rem', fontWeight: 700 }}>Calendario</button>
+                                <button onClick={() => setViewMode('calendar')} style={{ padding: '6px 15px', borderRadius: '8px', border: 'none', background: viewMode === 'calendar' ? 'var(--primary)' : 'transparent', color: viewMode === 'calendar' ? '#fff' : 'var(--text-main)', fontSize: '0.8rem', fontWeight: 700 }}>Mes</button>
+                                <button onClick={() => setViewMode('weekly')} style={{ padding: '6px 15px', borderRadius: '8px', border: 'none', background: viewMode === 'weekly' ? 'var(--primary)' : 'transparent', color: viewMode === 'weekly' ? '#fff' : 'var(--text-main)', fontSize: '0.8rem', fontWeight: 700 }}>Semana</button>
                                 <button onClick={() => setViewMode('list')} style={{ padding: '6px 15px', borderRadius: '8px', border: 'none', background: viewMode === 'list' ? 'var(--primary)' : 'transparent', color: viewMode === 'list' ? '#fff' : 'var(--text-main)', fontSize: '0.8rem', fontWeight: 700 }}>Lista</button>
-                            </div>
-                            <div style={{ display: 'flex', background: 'rgba(0,0,0,0.05)', padding: '4px', borderRadius: '10px' }}>
-                                {['all', 'tiktok', 'instagram', 'facebook'].map(p => (
-                                    <button key={p} onClick={() => setPlatformFilter(p)} title={p === 'all' ? 'Ver Todas' : `Filtrar ${p}`} style={{ padding: '6px 15px', borderRadius: '8px', border: 'none', background: platformFilter === p ? '#fff' : 'transparent', color: platformFilter === p ? '#000' : 'var(--text-main)', fontSize: '0.75rem', fontWeight: 800 }}>{p === 'all' ? 'Todas' : getPlatformIcon(p)}</button>
-                                ))}
-                            </div>
-                            <div style={{ display: 'flex', background: 'rgba(0,0,0,0.05)', padding: '4px', borderRadius: '10px' }}>
-                                {[{ id: 'all', l: 'Todos' }, { id: 'published', l: '✅' }, { id: 'pending', l: '🕒' }, { id: 'failed', l: '❌' }].map(s => (
-                                    <button key={s.id} onClick={() => setStatusFilter(s.id)} style={{ padding: '6px 15px', borderRadius: '8px', border: 'none', background: statusFilter === s.id ? '#fff' : 'transparent', color: statusFilter === s.id ? '#000' : 'var(--text-main)', fontSize: '0.75rem', fontWeight: 800 }}>{s.l}</button>
-                                ))}
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div style={{ marginTop: '30px' }}>
-                    {viewMode === 'calendar' ? <CalendarView /> : (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
-                            {filteredPosts.map(p => (
-                                <div key={p.id} className="card-v4" onClick={() => setViewingPost(p)} style={{ padding: '15px', border: '1px solid var(--glass-border)', cursor: 'pointer' }}>
-                                    <div style={{ display: 'flex', gap: '12px' }}>
-                                        <div style={{ width: '50px', height: '50px', background: '#000', borderRadius: '8px', overflow: 'hidden' }}>
-                                            {!p.cloudinary_url?.includes('.mp4') && <img src={p.cloudinary_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                <div style={{ marginTop: '30px', overflowX: 'auto', paddingBottom: '10px' }}>
+                    <div style={{ minWidth: viewMode === 'weekly' ? '1000px' : 'auto' }}>
+                        {viewMode === 'calendar' ? <MonthView /> : viewMode === 'weekly' ? <WeeklyView /> : (
+                            <div style={{ width: '100%' }}>
+                                <ControlBar />
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+                                    {filteredPosts.map(p => (
+                                        <div key={p.id} className="card-v4" onClick={() => setViewingPost(p)} style={{ padding: '15px', border: '1px solid var(--glass-border)', cursor: 'pointer' }}>
+                                            <div style={{ display: 'flex', gap: '12px' }}>
+                                                <div style={{ width: '50px', height: '50px', background: '#000', borderRadius: '8px', overflow: 'hidden' }}>
+                                                    {!p.cloudinary_url?.includes('.mp4') && <img src={p.cloudinary_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />}
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>{p.caption?.substring(0, 30)}...</div>
+                                                    <div style={{ display: 'flex', gap: '5px', marginTop: '4px' }}>{p.platforms?.map(plat => <span key={plat}>{getPlatformIcon(plat)}</span>)}</div>
+                                                </div>
+                                                <div style={{ textAlign: 'right' }}>
+                                                    <span style={{ fontSize: '0.55rem', padding: '2px 6px', borderRadius: '5px', background: getStatusColor(p.status, isDark), color: '#fff', fontWeight: 800 }}>{p.status}</span>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div style={{ flex: 1 }}>
-                                            <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>{p.caption?.substring(0, 30)}...</div>
-                                            <div style={{ display: 'flex', gap: '5px', marginTop: '4px' }}>{p.platforms?.map(plat => <span key={plat}>{getPlatformIcon(plat)}</span>)}</div>
-                                        </div>
-                                        <div style={{ textAlign: 'right' }}>
-                                            <span style={{ fontSize: '0.55rem', padding: '2px 6px', borderRadius: '5px', background: p.status === 'published' ? '#4ade80' : p.status === 'failed' ? '#f87171' : 'var(--primary)', color: '#fff', fontWeight: 800 }}>{p.status}</span>
-                                        </div>
-                                    </div>
+                                    ))}
                                 </div>
-                            ))}
-                        </div>
-                    )}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

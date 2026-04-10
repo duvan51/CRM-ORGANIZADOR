@@ -784,20 +784,28 @@ function App() {
           )}
         </div>
 
-        {activeTab === "agenda" && user.agendas?.length > 0 && (
+        {(activeTab === "agenda" || activeTab === "social") && user.agendas?.length > 0 && (
           <div className="agenda-tabs-container">
             <div className="agenda-tabs">
+              {(user.role === 'superuser' || user.role === 'owner') && (
+                <button
+                  className={`agenda-tab-btn ${activeAgenda === 'all' ? 'active' : ''}`}
+                  onClick={() => setActiveAgenda('all')}
+                >
+                  🌎 Todas las Sedes
+                </button>
+              )}
               {user.agendas.map(a => (
                 <button
                   key={a.id}
                   className={`agenda-tab-btn ${activeAgenda?.id === a.id ? 'active' : ''}`}
                   onClick={() => setActiveAgenda(a)}
                 >
-                  {a.name}
+                  📍 {a.name}
                 </button>
               ))}
             </div>
-            {user.role === "superuser" && <span className="superuser-badge">Super</span>}
+            {user.role === "superuser" && <span className="superuser-badge">Super Admin</span>}
           </div>
         )}
       </header>
@@ -854,7 +862,12 @@ function App() {
 
         {activeTab === "social" && user && (
           <div className="card">
-            <SocialPublisher user={user} clinicId={user.clinic_id || user.id} />
+            <SocialPublisher 
+               user={user} 
+               clinicId={user.clinic_id || user.id} 
+               activeAgenda={activeAgenda} 
+               allAgendas={user.agendas}
+            />
           </div>
         )}
 

@@ -155,6 +155,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
     // Superconfig (Password change)
     const [passwordData, setPasswordData] = useState({ newPassword: "", confirmPassword: "" });
     const [updatingPassword, setUpdatingPassword] = useState(false);
+    const [showSocialModal, setShowSocialModal] = useState(null);
 
     // Social Hub States
     const [socialPlatforms, setSocialPlatforms] = useState([]);
@@ -515,6 +516,17 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         if (!error) { setShowEditAgenda(null); fetchData(); }
     };
 
+    const togglePlatformAssignment = async (platformId, tableName, agendaId, isCurrentlyThis) => {
+        const { error } = await supabase.from(tableName)
+            .update({ agenda_id: isCurrentlyThis ? null : agendaId })
+            .eq('id', platformId);
+        
+        if (!error) {
+            fetchSocialData();
+            fetchMetaData(clinicId);
+        }
+    };
+
     const toggleAgentAssignment = async (userId, agendaId, isAssigned) => {
         if (isAssigned) {
             await supabase.from('agenda_users')
@@ -841,6 +853,7 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 setEditingAgenda({ name: ag.name, description: ag.description, slots_per_hour: ag.slots_per_hour, ciudad: ag.ciudad || "" });
                             }}>⚙️ Editar</button>
                             <button className="btn-secondary" onClick={() => setShowAgentModal(ag)}>👤 Agentes</button>
+                            <button className="btn-secondary" style={{ background: 'rgba(59, 130, 246, 0.1)', color: 'var(--primary)' }} onClick={() => setShowSocialModal(ag)}>📱 Social</button>
                             <button className="btn-delete" onClick={() => handleDeleteAgenda(ag.id)}>🗑️</button>
                         </div>
                     </div>
@@ -3736,6 +3749,57 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         </div>
                         <div className="modal-footer">
                             <button className="btn-secondary" onClick={() => setShowAgentModal(null)}>Cerrar</button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
+
+            {showSocialModal && createPortal(
+                <div className="modal-overlay" onClick={() => setShowSocialModal(null)}>
+                    <div className="modal-content premium-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '450px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                            <h3 style={{ margin: 0 }}>Social Hub: {showSocialModal.name}</h3>
+                            <button className="btn-close" onClick={() => setShowSocialModal(null)}>×</button>
+                        </div>
+                        <p className="text-muted" style={{ fontSize: '0.8rem', marginBottom: '20px' }}>Selecciona qué cuentas de redes sociales pertenecen a esta sede específica.</p>
+                        
+                        <div style={{ maxHeight: '400px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {[
+                                ...socialPlatforms.map(p => ({ ...p, table: 'social_platforms', type: p.platform_name, name: p.platform_user_name })),
+                                ...metaSocialAccounts.map(p => ({ ...p, table: 'meta_social_accounts', type: p.platform === 'messenger' ? 'facebook' : p.platform, name: p.name }))
+                            ].length === 0 && <p className="text-center text-muted">No has conectado ninguna cuenta aún.</p>}
+                            
+                            {[
+                                ...socialPlatforms.map(p => ({ ...p, table: 'social_platforms', type: p.platform_name, name: p.platform_user_name })),
+                                ...metaSocialAccounts.map(p => ({ ...p, table: 'meta_social_accounts', type: p.platform === 'messenger' ? 'facebook' : p.platform, name: p.name }))
+                            ].map(plat => {
+                                const isAssignedToThis = plat.agenda_id === showSocialModal.id;
+                                const isAssignedToOther = plat.agenda_id && plat.agenda_id !== showSocialModal.id;
+                                
+                                return (
+                                    <div key={`${plat.table}-${plat.id}`} style={{ padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <span style={{ fontSize: '1.2rem' }}>{plat.type === 'tiktok' ? '📱' : plat.type === 'instagram' ? '📸' : '👤'}</span>
+                                            <div>
+                                                <div style={{ fontWeight: 800, fontSize: '0.75rem', textTransform: 'uppercase' }}>{plat.type}</div>
+                                                <div style={{ fontSize: '0.9rem' }}>{plat.name}</div>
+                                                {isAssignedToOther && <small style={{ color: 'var(--accent)', fontSize: '0.6rem' }}>⚠️ Asignada a otra sede</small>}
+                                            </div>
+                                        </div>
+                                        <button 
+                                            className={isAssignedToThis ? "btn-delete" : "btn-process"}
+                                            style={{ padding: '5px 10px', fontSize: '0.7rem' }}
+                                            onClick={() => togglePlatformAssignment(plat.id, plat.table, showSocialModal.id, isAssignedToThis)}
+                                        >
+                                            {isAssignedToThis ? "Desvincular" : "Vincular"}
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div className="modal-footer" style={{ marginTop: '20px' }}>
+                            <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setShowSocialModal(null)}>Cerrar</button>
                         </div>
                     </div>
                 </div>,
