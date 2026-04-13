@@ -15,7 +15,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,txt}'],
         skipWaiting: true,
         clientsClaim: true,
-        navigateFallbackDenylist: [/^\/tiktok/],
+        navigateFallbackDenylist: [/^\/tiktok/, /^\/google/],
       },
       manifest: {
         name: 'CRM Organizador',

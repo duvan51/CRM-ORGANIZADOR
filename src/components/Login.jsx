@@ -212,10 +212,32 @@ const Login = ({ onLoginSuccess }) => {
                     </button>
                 </form>
 
-                <div className="login-footer">
-                    <p>
-                        Usa tus credenciales autorizadas.<br />
-                        Default: <code>admin@test.com</code> / <code>admin123</code>
+                <div style={{ marginTop: '30px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
+                    <h3 style={{ fontSize: '0.9rem', color: 'var(--primary)', marginBottom: '10px' }}>¿Qué es AndoCRM?</h3>
+                    <p style={{ fontSize: '0.8rem', opacity: 0.7, lineHeight: '1.6', marginBottom: '20px' }}>
+                        Potencia tu clínica con nuestra plataforma todo en uno. Gestión inteligente de citas, 
+                        automatización de redes sociales (YouTube, TikTok, Instagram) y marketing predictivo 
+                        diseñado para profesionales de la salud.
+                    </p>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
+                        <div style={{ padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', fontSize: '0.7rem' }}>
+                            📅 Agenda Pro
+                        </div>
+                        <div style={{ padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', fontSize: '0.7rem' }}>
+                            📱 Social Hub
+                        </div>
+                    </div>
+                </div>
+
+                <div className="login-footer" style={{ marginTop: '20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', marginBottom: '15px', fontSize: '0.75rem' }}>
+                        <a href="#privacy-policy" style={{ color: 'var(--primary)', textDecoration: 'none' }}>Política de Privacidad</a>
+                        <span style={{ opacity: 0.3 }}>|</span>
+                        <a href="#terms-of-service" style={{ color: 'var(--primary)', textDecoration: 'none' }}>Términos de Servicio</a>
+                    </div>
+                    <p style={{ fontSize: '0.7rem', opacity: 0.5 }}>
+                        © 2026 AndoCRM. Todos los derechos reservados.
                     </p>
                 </div>
             </div>

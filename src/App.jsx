@@ -514,8 +514,8 @@ function App() {
         <h3>2. Uso de la información</h3>
         <p>Utilizamos sus datos únicamente para la operación técnica del CRM, el seguimiento de citas médicas, la provisión de respuestas automatizadas mediante nuestra IA integrada y la programación de videos en redes sociales.</p>
 
-        <h3>3. Integración con Meta y TikTok</h3>
-        <p>Nuestra aplicación utiliza las APIs de Meta y TikTok Business. Solo accedemos a la información necesaria para gestionar sus campañas de Ads, mensajes de WhatsApp y publicación de videos automatizados. No vendemos sus datos a terceros.</p>
+        <h3>3. Integración con Meta, TikTok y Google</h3>
+        <p>Nuestra aplicación utiliza las APIs de Meta, TikTok Business y Google Services (YouTube API / Google Business Profile). Solo accedemos a la información necesaria para gestionar sus campañas de Ads, mensajes de WhatsApp, publicación de videos en YouTube y gestión de perfiles de empresa. No vendemos sus datos a terceros.</p>
 
         <h3>4. Procesamiento Multimedia</h3>
         <p>Utilizamos Cloudinary para el procesamiento y almacenamiento optimizado de activos multimedia (videos/fotos) publicados de forma automatizada por el CRM.</p>
