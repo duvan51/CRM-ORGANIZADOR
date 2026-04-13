@@ -444,13 +444,15 @@ const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
 
                 {viewingPost && (
                     <div style={{ position: 'fixed', top: '20px', bottom: '20px', left: '20px', right: '20px', background: isDark ? '#000' : '#f8fafc', zIndex: 999999, display: 'grid', gridTemplateColumns: '1.4fr 1fr', animation: 'fadeIn 0.2s', borderRadius: '40px', overflow: 'hidden', boxShadow: `0 50px 100px ${isDark ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.1)'}`, border: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.08)'}` }}>
-                        <div style={{ background: isDark ? '#000' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                            <button onClick={() => setViewingPost(null)} style={{ position: 'absolute', top: '30px', left: '30px', background: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', border: 'none', color: isDark ? '#fff' : '#1e293b', padding: '10px 20px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800, backdropFilter: 'blur(10px)', fontSize: '0.75rem' }}>← SALIR DE VISTA</button>
-                            {viewingPost.cloudinary_url?.includes('.mp4') ? (
-                                <video src={viewingPost.cloudinary_url} controls autoPlay style={{ maxWidth: '85%', maxHeight: '85%', borderRadius: '10px' }} />
-                            ) : (
-                                <img src={viewingPost.cloudinary_url} style={{ maxWidth: '85%', maxHeight: '85%', objectFit: 'contain' }} />
-                            )}
+                        <div style={{ background: isDark ? '#000' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflowY: 'auto' }}>
+                            <button onClick={() => setViewingPost(null)} style={{ position: 'absolute', top: '30px', left: '30px', background: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)', border: 'none', color: isDark ? '#fff' : '#1e293b', padding: '10px 20px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800, backdropFilter: 'blur(10px)', fontSize: '0.75rem', zIndex: 10 }}>← SALIR DE VISTA</button>
+                            <div style={{ width: '100%', display: 'flex', justifyContent: 'center', padding: '40px' }}>
+                                {viewingPost.cloudinary_url?.includes('.mp4') ? (
+                                    <video src={viewingPost.cloudinary_url} controls autoPlay style={{ maxWidth: '90%', height: 'auto', borderRadius: '20px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }} />
+                                ) : (
+                                    <img src={viewingPost.cloudinary_url} style={{ maxWidth: '90%', height: 'auto', objectFit: 'contain', borderRadius: '20px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }} />
+                                )}
+                            </div>
                         </div>
                         <div style={{ background: isDark ? '#0d0d0d' : '#fff', borderLeft: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`, padding: '40px 40px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
                             <div style={{ marginBottom: '30px' }}>
