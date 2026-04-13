@@ -17,7 +17,9 @@ const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
     const [platformConfigs, setPlatformConfigs] = useState({
         facebook: { type: 'feed', title: '' },
         instagram: { type: 'reel' },
-        tiktok: { type: 'video' }
+        tiktok: { type: 'video' },
+        youtube: { type: 'short' },
+        google: { type: 'post' }
     });
 
     // View, Date & Filters
@@ -102,8 +104,8 @@ const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
             const combined = [
                 ...(tiktokData || []).map(p => ({ 
                     id: p.id,
-                    platform: 'tiktok', 
-                    user_name: p.platform_user_name || 'TikTok User',
+                    platform: p.platform_name, 
+                    user_name: p.platform_user_name || (p.platform_name === 'youtube' ? 'YouTube Channel' : p.platform_name === 'google_business' ? 'Google Profile' : 'TikTok User'),
                     agenda_id: p.agenda_id 
                 })),
                 ...(metaData || []).map(p => ({ 
@@ -239,7 +241,13 @@ const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
         );
     };
 
-    const getPlatformIcon = (p) => p === 'tiktok' ? '📱' : p === 'instagram' ? '📸' : '👤';
+    const getPlatformIcon = (p) => {
+        if (p === 'tiktok') return '📱';
+        if (p === 'instagram') return '📸';
+        if (p === 'youtube') return '📺';
+        if (p === 'google' || p === 'google_business') return '🏢';
+        return '👤';
+    };
 
     const getStatusColor = (status, isDark) => {
         if (status === 'published' || status === 'partially_published') {
@@ -273,6 +281,8 @@ const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
                     <option value="tiktok">TikTok</option>
                     <option value="instagram">Instagram</option>
                     <option value="facebook">Facebook</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="google">Google Business</option>
                 </select>
                 <button onClick={() => setShowAccountManager(true)} style={{ padding: '10px 15px', borderRadius: '12px', background: 'rgba(255,255,255,0.1)', border: '1px solid var(--glass-border)', color: 'var(--text-main)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 700 }}>
                     ⚙️ Config
@@ -547,23 +557,23 @@ const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
                     <div style={{ marginBottom: '15px' }}>
                         <label style={{ display: 'block', marginBottom: '8px', fontWeight: 700, fontSize: '0.8rem' }}>Canales Seleccionados</label>
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                            {['tiktok', 'instagram', 'facebook'].map(p => {
+                            {['tiktok', 'instagram', 'facebook', 'youtube', 'google'].map(p => {
                                 const isSelected = selectedPlatforms.includes(p);
-                                const connected = connectedPlatforms.find(cp => cp.platform === p);
+                                const connected = connectedPlatforms.find(cp => cp.platform === p || (p === 'google' && cp.platform === 'google_business'));
                                 return (
                                     <button 
                                         key={p} 
                                         onClick={() => connected && setSelectedPlatforms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])} 
                                         style={{ 
                                             flex: 1, 
-                                            minWidth: '100px',
+                                            minWidth: '85px',
                                             padding: '10px 8px', 
                                             borderRadius: '12px', 
                                             border: '1px solid var(--glass-border)', 
                                             background: isSelected ? 'var(--primary)' : 'rgba(0,0,0,0.05)', 
                                             color: isSelected ? '#fff' : 'var(--text-main)', 
                                             opacity: connected ? 1 : 0.3, 
-                                            fontSize: '0.7rem', 
+                                            fontSize: '0.65rem', 
                                             fontWeight: 700,
                                             display: 'flex',
                                             flexDirection: 'column',
@@ -574,7 +584,7 @@ const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
                                         }}
                                     >
                                         <div style={{ fontSize: '1.2rem' }}>{getPlatformIcon(p)}</div>
-                                        <div style={{ fontWeight: 800 }}>{p.toUpperCase()}</div>
+                                        <div style={{ fontWeight: 800 }}>{p === 'google' ? 'GOOGLE' : p.toUpperCase()}</div>
                                         {connected && (
                                             <div style={{ fontSize: '0.55rem', opacity: isSelected ? 0.9 : 0.5, fontWeight: 600, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                 👤 {connected.user_name}
@@ -605,6 +615,26 @@ const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
                                 <div style={{ display: 'flex', gap: '6px' }}>
                                     {[{ id: 'feed', label: 'Feed' }, { id: 'reel', label: 'Reel' }].map(opt => (
                                         <button key={opt.id} onClick={() => updateConfig('instagram', 'type', opt.id)} style={{ flex: 1, padding: '6px', borderRadius: '6px', border: '1px solid var(--glass-border)', background: platformConfigs.instagram.type === opt.id ? 'var(--primary)' : 'rgba(0,0,0,0.04)', color: platformConfigs.instagram.type === opt.id ? '#fff' : 'var(--text-main)', fontSize: '0.7rem', fontWeight: 700 }}>{opt.label}</button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        {selectedPlatforms.includes('youtube') && (
+                            <div style={{ marginTop: '10px' }}>
+                                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, marginBottom: '5px' }}>📺 YouTube</label>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                    {[{ id: 'short', label: 'Short' }, { id: 'video', label: 'Video' }].map(opt => (
+                                        <button key={opt.id} onClick={() => updateConfig('youtube', 'type', opt.id)} style={{ flex: 1, padding: '6px', borderRadius: '6px', border: '1px solid var(--glass-border)', background: platformConfigs.youtube.type === opt.id ? 'var(--primary)' : 'rgba(0,0,0,0.04)', color: platformConfigs.youtube.type === opt.id ? '#fff' : 'var(--text-main)', fontSize: '0.7rem', fontWeight: 700 }}>{opt.label}</button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        {selectedPlatforms.includes('google') && (
+                            <div style={{ marginTop: '10px' }}>
+                                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, marginBottom: '5px' }}>🏢 Google Business</label>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                    {[{ id: 'post', label: 'Novedad' }, { id: 'offer', label: 'Oferta' }].map(opt => (
+                                        <button key={opt.id} onClick={() => updateConfig('google', 'type', opt.id)} style={{ flex: 1, padding: '6px', borderRadius: '6px', border: '1px solid var(--glass-border)', background: platformConfigs.google.type === opt.id ? 'var(--primary)' : 'rgba(0,0,0,0.04)', color: platformConfigs.google.type === opt.id ? '#fff' : 'var(--text-main)', fontSize: '0.7rem', fontWeight: 700 }}>{opt.label}</button>
                                     ))}
                                 </div>
                             </div>
@@ -646,8 +676,8 @@ const SocialPublisher = ({ user, clinicId, activeAgenda, allAgendas }) => {
                 <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column' }}>
                     <h3 style={{ fontSize: '0.8rem', marginBottom: '15px', opacity: 0.6 }}>📱 Vista Previa</h3>
                     <div style={{ display: 'flex', gap: '6px', marginBottom: '15px', background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', padding: '3px', borderRadius: '8px' }}>
-                        {['instagram', 'tiktok', 'facebook'].map(plat => (
-                            <button key={plat} onClick={() => setActivePreview(plat)} style={{ flex: 1, padding: '5px', borderRadius: '6px', border: 'none', background: activePreview === plat ? 'var(--primary)' : 'transparent', color: activePreview === plat ? '#fff' : 'var(--text-main)', opacity: activePreview === plat ? 1 : 0.6, fontWeight: 800, fontSize: '0.65rem', cursor: 'pointer' }}>{plat.toUpperCase()}</button>
+                        {['instagram', 'tiktok', 'facebook', 'youtube', 'google'].map(plat => (
+                            <button key={plat} onClick={() => setActivePreview(plat)} style={{ flex: 1, padding: '4px', borderRadius: '6px', border: 'none', background: activePreview === plat ? 'var(--primary)' : 'transparent', color: activePreview === plat ? '#fff' : 'var(--text-main)', opacity: activePreview === plat ? 1 : 0.6, fontWeight: 800, fontSize: '0.6rem', cursor: 'pointer' }}>{plat.toUpperCase()}</button>
                         ))}
                     </div>
                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

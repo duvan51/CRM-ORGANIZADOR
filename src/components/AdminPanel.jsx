@@ -3319,6 +3319,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         window.location.href = redirectUrl;
     };
 
+    const handleGoogleLogin = (type) => {
+        // type can be 'youtube' or 'google_business'
+        const redirectUrl = `https://tlezyskwzbhgdudmbfbn.supabase.co/functions/v1/google-oauth?clinic_id=${clinicId}&type=${type}`;
+        window.location.href = redirectUrl;
+    };
+
     const renderSocialHubConfig = () => {
         const tiktok = socialPlatforms.find(p => p.platform_name === 'tiktok');
         const instagram = metaSocialAccounts.find(p => p.platform === 'instagram');
@@ -3352,6 +3358,64 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <button className="btn-process" style={{ width: '100%' }} onClick={handleTikTokLogin}>
                             {tiktok ? '🔄 Reconectar TikTok' : '🔗 Conectar TikTok ahora'}
                         </button>
+                    </div>
+
+                    {/* YOUTUBE CARD */}
+                    <div className="premium-card">
+                        {(() => {
+                            const youtube = socialPlatforms.find(p => p.platform_name === 'youtube');
+                            return (
+                                <>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <span style={{ fontSize: '2rem' }}>📺</span>
+                                            <h4 style={{ margin: 0 }}>YouTube Channel</h4>
+                                        </div>
+                                        <span className={`status-pill ${youtube ? 'open' : 'closed'}`}>
+                                            {youtube ? 'Conectado' : 'Desconectado'}
+                                        </span>
+                                    </div>
+                                    {youtube && (
+                                        <div style={{ marginBottom: '20px', padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px' }}>
+                                            <p style={{ margin: 0, fontWeight: 600 }}>{youtube.platform_user_name}</p>
+                                            <small style={{ opacity: 0.6 }}>ID: {youtube.platform_user_id}</small>
+                                        </div>
+                                    )}
+                                    <button className="btn-process" style={{ width: '100%', background: '#ff0000', border: 'none' }} onClick={() => handleGoogleLogin('youtube')}>
+                                        {youtube ? '🔄 Reconectar YouTube' : '🔗 Conectar YouTube'}
+                                    </button>
+                                </>
+                            );
+                        })()}
+                    </div>
+
+                    {/* GOOGLE BUSINESS CARD */}
+                    <div className="premium-card">
+                        {(() => {
+                            const gbusiness = socialPlatforms.find(p => p.platform_name === 'google_business');
+                            return (
+                                <>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <span style={{ fontSize: '2rem' }}>🏢</span>
+                                            <h4 style={{ margin: 0 }}>Google Business</h4>
+                                        </div>
+                                        <span className={`status-pill ${gbusiness ? 'open' : 'closed'}`}>
+                                            {gbusiness ? 'Conectado' : 'Desconectado'}
+                                        </span>
+                                    </div>
+                                    {gbusiness && (
+                                        <div style={{ marginBottom: '20px', padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px' }}>
+                                            <p style={{ margin: 0, fontWeight: 600 }}>{gbusiness.platform_user_name}</p>
+                                            <small style={{ opacity: 0.6 }}>Perfil de Empresa</small>
+                                        </div>
+                                    )}
+                                    <button className="btn-process" style={{ width: '100%', background: '#4285F4', border: 'none' }} onClick={() => handleGoogleLogin('google_business')}>
+                                        {gbusiness ? '🔄 Reconectar Google Business' : '🔗 Conectar Perfil de Empresa'}
+                                    </button>
+                                </>
+                            );
+                        })()}
                     </div>
 
                     {/* INSTAGRAM CARD */}
@@ -3780,7 +3844,12 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                                 return (
                                     <div key={`${plat.table}-${plat.id}`} style={{ padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                            <span style={{ fontSize: '1.2rem' }}>{plat.type === 'tiktok' ? '📱' : plat.type === 'instagram' ? '📸' : '👤'}</span>
+                                            <span style={{ fontSize: '1.2rem' }}>
+                                                {plat.type === 'tiktok' ? '📱' : 
+                                                 plat.type === 'instagram' ? '📸' : 
+                                                 plat.type === 'youtube' ? '📺' :
+                                                 plat.type === 'google_business' ? '🏢' : '👤'}
+                                            </span>
                                             <div>
                                                 <div style={{ fontWeight: 800, fontSize: '0.75rem', textTransform: 'uppercase' }}>{plat.type}</div>
                                                 <div style={{ fontSize: '0.9rem' }}>{plat.name}</div>
