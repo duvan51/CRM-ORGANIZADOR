@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../supabase";
 import AndoLogo from "../assets/logoAndoCrm.png";
+import LoginIllustration from "../assets/login_illustration.png";
 import "../login_premium.css";
 
 const Login = ({ onLoginSuccess }) => {
@@ -132,116 +133,148 @@ const Login = ({ onLoginSuccess }) => {
 
     return (
         <div className="login-container">
-            <div className="login-card">
-                <div className="login-brand">
-                    <img src={AndoLogo} alt="AndoCRM Logo" style={{ width: '100px', height: '100px', marginBottom: '15px', objectFit: 'contain' }} />
-                    <h1>AndoCRM</h1>
-                    <p>Gestión Inteligente</p>
+            <div className="login-wrapper">
+                {/* Columna Izquierda: Showcase de AndoCRM (Visible en Desktop/Tablet) */}
+                <div className="login-showcase">
+                    <div className="showcase-content">
+                        <div className="showcase-badge">Premium Experience</div>
+                        <h1>Impulsa tu <span className="text-gradient">Clínica</span> al siguiente nivel</h1>
+                        <p className="showcase-description">
+                            AndoCRM es la plataforma inteligente que transforma la gestión de tu centro de salud. 
+                            Automatiza procesos, escala tu presencia en redes y fideliza a tus pacientes con IA.
+                        </p>
+                        
+                        <div className="features-grid">
+                            <div className="feature-item">
+                                <div className="feature-icon">📅</div>
+                                <div className="feature-text">
+                                    <strong>Agenda Pro</strong>
+                                    <span>Gestión de citas ultra rápida</span>
+                                </div>
+                            </div>
+                            <div className="feature-item">
+                                <div className="feature-icon">🤖</div>
+                                <div className="feature-text">
+                                    <strong>IA Marketing</strong>
+                                    <span>Marketing predictivo inteligente</span>
+                                </div>
+                            </div>
+                            <div className="feature-item">
+                                <div className="feature-icon">📱</div>
+                                <div className="feature-text">
+                                    <strong>Social Hub</strong>
+                                    <span>TikTok, IG & YT Automatizado</span>
+                                </div>
+                            </div>
+                            <div className="feature-item">
+                                <div className="feature-icon">📈</div>
+                                <div className="feature-text">
+                                    <strong>Analytics</strong>
+                                    <span>Control total en tiempo real</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="showcase-visual">
+                            <img src={LoginIllustration} alt="AndoCRM Illustration" className="illustration-img" />
+                        </div>
+                    </div>
                 </div>
 
-                <form className="login-form" onSubmit={handleSubmit}>
-                    <div className="form-group">
-                        <label>Correo Electrónico</label>
-                        <input
-                            type="email"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            required
-                            placeholder="tu@correo.com"
-                        />
-                    </div>
+                {/* Columna Derecha: Formulario de Login */}
+                <div className="login-card-side">
+                    <div className="login-card">
+                        <div className="login-brand">
+                            <img src={AndoLogo} alt="AndoCRM Logo" className="mobile-only-logo" />
+                            <h1>Bienvenido a <span className="text-gradient">AndoCRM</span></h1>
+                            <p>Gestión Inteligente para Profesionales</p>
+                        </div>
 
-                    <div className="form-group">
-                        <label>Contraseña</label>
-                        <div className="password-wrapper">
-                            <input
-                                type={showPassword ? "text" : "password"}
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                                placeholder="••••••••"
-                            />
+                        <form className="login-form" onSubmit={handleSubmit}>
+                            <div className="form-group">
+                                <label>Correo Electrónico</label>
+                                <input
+                                    type="email"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    required
+                                    placeholder="ejemplo@andocrm.com"
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label>Contraseña</label>
+                                <div className="password-wrapper">
+                                    <input
+                                        type={showPassword ? "text" : "password"}
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        required
+                                        placeholder="••••••••"
+                                    />
+                                    <button
+                                        type="button"
+                                        className="toggle-password-btn"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        tabIndex="-1"
+                                    >
+                                        {showPassword ? "👁️‍🗨️" : "👁️"}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="login-options">
+                                <label className="remember-me">
+                                    <input
+                                        type="checkbox"
+                                        checked={rememberMe}
+                                        onChange={(e) => setRememberMe(e.target.checked)}
+                                    />
+                                    Recordar usuario
+                                </label>
+                                <a href="#" className="forgot-password" onClick={handleForgotPassword}>
+                                    ¿Olvidaste tu contraseña?
+                                </a>
+                            </div>
+
+                            {error && <div className="error-message fade-in">{error}</div>}
+
+                            <button
+                                type="submit"
+                                className="btn-process"
+                                disabled={loading}
+                            >
+                                {loading ? <div className="spinner" /> : "Iniciar Sesión"}
+                            </button>
+
+                            <div className="login-divider">
+                                <span>O continuar con</span>
+                            </div>
+
                             <button
                                 type="button"
-                                className="toggle-password-btn"
-                                onClick={() => setShowPassword(!showPassword)}
-                                tabIndex="-1"
+                                className="btn-social google"
+                                onClick={handleGoogleLogin}
+                                disabled={loading}
                             >
-                                {showPassword ? "👁️‍🗨️" : "👁️"}
+                                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" width="18" height="18" />
+                                Google
                             </button>
+                        </form>
+
+                        <div className="login-footer">
+                            <div className="footer-links">
+                                <a href="#privacy">Privacidad</a>
+                                <span>•</span>
+                                <a href="#terms">Términos</a>
+                            </div>
+                            <p>© 2026 AndoCRM. Powered by Advanced AI.</p>
                         </div>
                     </div>
-
-                    <div className="login-options">
-                        <label className="remember-me">
-                            <input
-                                type="checkbox"
-                                checked={rememberMe}
-                                onChange={(e) => setRememberMe(e.target.checked)}
-                            />
-                            Recordar usuario
-                        </label>
-                        <a href="#" className="forgot-password" onClick={handleForgotPassword}>
-                            ¿Olvidaste tu contraseña?
-                        </a>
-                    </div>
-
-                    {error && <div className="fade-in" style={{ color: "#f87171", fontSize: "0.85rem", textAlign: "center", background: "rgba(239, 68, 68, 0.1)", padding: "10px", borderRadius: "8px" }}>{error}</div>}
-
-                    <button
-                        type="submit"
-                        className="btn-process"
-                        style={{ width: "100%", justifyContent: "center", padding: "15px", fontSize: "1rem" }}
-                        disabled={loading}
-                    >
-                        {loading ? <div className="spinner" /> : "Iniciar Sesión"}
-                    </button>
-
-                    <div className="login-divider">
-                        <span>O continuar con</span>
-                    </div>
-
-                    <button
-                        type="button"
-                        className="btn-social google"
-                        onClick={handleGoogleLogin}
-                        disabled={loading}
-                    >
-                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" width="18" height="18" />
-                        Google
-                    </button>
-                </form>
-
-                <div style={{ marginTop: '30px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
-                    <h3 style={{ fontSize: '0.9rem', color: 'var(--primary)', marginBottom: '10px' }}>¿Qué es AndoCRM?</h3>
-                    <p style={{ fontSize: '0.8rem', opacity: 0.7, lineHeight: '1.6', marginBottom: '20px' }}>
-                        Potencia tu clínica con nuestra plataforma todo en uno. Gestión inteligente de citas, 
-                        automatización de redes sociales (YouTube, TikTok, Instagram) y marketing predictivo 
-                        diseñado para profesionales de la salud.
-                    </p>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
-                        <div style={{ padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', fontSize: '0.7rem' }}>
-                            📅 Agenda Pro
-                        </div>
-                        <div style={{ padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', fontSize: '0.7rem' }}>
-                            📱 Social Hub
-                        </div>
-                    </div>
-                </div>
-
-                <div className="login-footer" style={{ marginTop: '20px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', marginBottom: '15px', fontSize: '0.75rem' }}>
-                        <a href="#privacy-policy" style={{ color: 'var(--primary)', textDecoration: 'none' }}>Política de Privacidad</a>
-                        <span style={{ opacity: 0.3 }}>|</span>
-                        <a href="#terms-of-service" style={{ color: 'var(--primary)', textDecoration: 'none' }}>Términos de Servicio</a>
-                    </div>
-                    <p style={{ fontSize: '0.7rem', opacity: 0.5 }}>
-                        © 2026 AndoCRM. Todos los derechos reservados.
-                    </p>
                 </div>
             </div>
         </div>
+
     );
 };
 
