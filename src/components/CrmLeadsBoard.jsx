@@ -108,11 +108,6 @@ export default function CrmLeadsBoard({ user, activeAgenda }) {
         e.preventDefault();
         if (draggedLead && draggedLead.estado !== targetStatus) {
             updateLeadStatus(draggedLead.id, targetStatus);
-
-            // If dropping into Llamado or Mensaje Enviado, tracking action automatically
-            if (targetStatus === 'Mensaje Enviado' && draggedLead.celular) {
-                window.open(`https://wa.me/57${draggedLead.celular.replace(/\D/g, '')}?text=Hola+${encodeURIComponent(draggedLead.nombres_completos)}`, '_blank');
-            }
         }
         setDraggedLead(null);
     };
@@ -192,6 +187,29 @@ export default function CrmLeadsBoard({ user, activeAgenda }) {
                                             opacity: draggedLead?.id === lead.id ? 0.5 : 1
                                         }}
                                     >
+                                        <div 
+                                            className="card-drag-handle" 
+                                            style={{
+                                                display: 'flex',
+                                                justifyContent: 'center',
+                                                alignItems: 'center',
+                                                background: 'rgba(255, 255, 255, 0.02)',
+                                                borderBottom: '1px solid var(--glass-border)',
+                                                margin: '-12px -12px 10px -12px',
+                                                padding: '4px',
+                                                borderTopLeftRadius: '7px',
+                                                borderTopRightRadius: '7px',
+                                                cursor: 'grab',
+                                                color: 'var(--text-muted)',
+                                                fontSize: '0.65rem',
+                                                fontWeight: 'bold',
+                                                letterSpacing: '1px',
+                                                userSelect: 'none'
+                                            }}
+                                        >
+                                            ⣿ ARRASTRAR PARA MOVER ⣿
+                                        </div>
+
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                                                 {isManager && lead.estado === 'Nuevo' && (
@@ -219,7 +237,10 @@ export default function CrmLeadsBoard({ user, activeAgenda }) {
                                         <div style={{ display: 'flex', gap: '5px', marginTop: '10px', borderTop: '1px solid var(--glass-border)', paddingTop: '10px' }}>
                                             {lead.celular && (
                                                 <button
-                                                    onClick={() => window.open(`https://wa.me/57${lead.celular.replace(/\D/g, '')}?text=Hola+${encodeURIComponent(lead.nombres_completos)}`, '_blank')}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        window.open(`https://wa.me/57${lead.celular.replace(/\D/g, '')}?text=Hola+${encodeURIComponent(lead.nombres_completos)}`, '_blank');
+                                                    }}
                                                     style={{ background: 'rgba(37, 211, 102, 0.1)', color: '#25D366', border: 'none', padding: '5px', borderRadius: '4px', cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'center', transition: 'transform 0.1s' }}
                                                     title="WhatsApp"
                                                     onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
@@ -232,7 +253,10 @@ export default function CrmLeadsBoard({ user, activeAgenda }) {
                                                 <button
                                                     style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: 'none', padding: '5px', borderRadius: '4px', cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'center', transition: 'transform 0.1s' }}
                                                     title="Llamar"
-                                                    onClick={() => updateLeadStatus(lead.id, 'Llamado')}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        updateLeadStatus(lead.id, 'Llamado');
+                                                    }}
                                                     onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
                                                     onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
                                                 >
@@ -243,7 +267,10 @@ export default function CrmLeadsBoard({ user, activeAgenda }) {
                                                 <button
                                                     style={{ background: 'rgba(234, 179, 8, 0.1)', color: '#eab308', border: 'none', padding: '5px', borderRadius: '4px', cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'center', transition: 'transform 0.1s' }}
                                                     title="Email"
-                                                    onClick={() => updateLeadStatus(lead.id, 'Mensaje Enviado')}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        updateLeadStatus(lead.id, 'Mensaje Enviado');
+                                                    }}
                                                     onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
                                                     onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
                                                 >

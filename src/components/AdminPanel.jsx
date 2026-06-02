@@ -3325,6 +3325,26 @@ const AdminPanel = ({ token, onBack, userRole }) => {
         window.location.href = redirectUrl;
     };
 
+    const toggleConversationSync = async (platform, configObj) => {
+        try {
+            if (platform === 'instagram' || platform === 'messenger') {
+                const newStatus = !configObj.is_active;
+                await supabase.from('meta_social_accounts').update({ is_active: newStatus }).eq('id', configObj.id);
+                setMetaSocialAccounts(prev => prev.map(p => p.id === configObj.id ? { ...p, is_active: newStatus } : p));
+            } else if (platform === 'whatsapp_cloud') {
+                const newStatus = !configObj.is_active;
+                await supabase.from('ai_agent_config').update({ is_active: newStatus }).eq('clinic_id', clinicId);
+                setAiAgentConfig(prev => ({ ...prev, is_active: newStatus }));
+            } else if (platform === 'whaticket') {
+                const newStatus = !configObj.is_active;
+                await supabase.from('whaticket_configs').update({ is_active: newStatus }).eq('clinic_id', clinicId);
+                setWhaticketConfig(prev => ({ ...prev, is_active: newStatus }));
+            }
+        } catch (err) {
+            alert("Error al actualizar estado: " + err.message);
+        }
+    };
+
     const renderSocialHubConfig = () => {
         const tiktok = socialPlatforms.find(p => p.platform_name === 'tiktok');
         const instagram = metaSocialAccounts.find(p => p.platform === 'instagram');
@@ -3433,6 +3453,14 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             <div style={{ marginBottom: '20px', padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px' }}>
                                 <p style={{ margin: 0, fontWeight: 600 }}>{instagram.name}</p>
                                 <small style={{ opacity: 0.6 }}>IG Business Account</small>
+                                
+                                <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '0.85rem' }}>💬 Sync. en Conversaciones</span>
+                                    <label className="switch">
+                                        <input type="checkbox" checked={instagram.is_active} onChange={() => toggleConversationSync('instagram', instagram)} />
+                                        <span className="slider round"></span>
+                                    </label>
+                                </div>
                             </div>
                         ) : (
                             <p style={{ fontSize: '0.8rem', opacity: 0.6, marginBottom: '20px' }}>Conecta Instagram desde la sección "Meta Ads".</p>
@@ -3457,6 +3485,14 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                             <div style={{ marginBottom: '20px', padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px' }}>
                                 <p style={{ margin: 0, fontWeight: 600 }}>{facebook.name}</p>
                                 <small style={{ opacity: 0.6 }}>Página de Facebook</small>
+
+                                <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '0.85rem' }}>💬 Sync. en Conversaciones</span>
+                                    <label className="switch">
+                                        <input type="checkbox" checked={facebook.is_active} onChange={() => toggleConversationSync('messenger', facebook)} />
+                                        <span className="slider round"></span>
+                                    </label>
+                                </div>
                             </div>
                         ) : (
                             <p style={{ fontSize: '0.8rem', opacity: 0.6, marginBottom: '20px' }}>Conecta Facebook desde la sección "Meta Ads".</p>
@@ -3464,6 +3500,60 @@ const AdminPanel = ({ token, onBack, userRole }) => {
                         <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setActiveView('meta')}>
                             ⚙️ Ir a Configuración Meta
                         </button>
+                    </div>
+
+                    {/* WHATSAPP CARD */}
+                    <div className="premium-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ fontSize: '2rem' }}>💬</span>
+                                <h4 style={{ margin: 0 }}>WhatsApp</h4>
+                            </div>
+                            <span className={`status-pill ${(whaticketConfig?.is_active || aiAgentConfig?.is_active) ? 'open' : 'closed'}`}>
+                                {(whaticketConfig?.api_key || aiAgentConfig?.phone_id) ? 'Configurado' : 'Sin Configurar'}
+                            </span>
+                        </div>
+                        
+                        {(whaticketConfig?.api_key || aiAgentConfig?.phone_id) ? (
+                            <div style={{ marginBottom: '20px', padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px' }}>
+                                {aiAgentConfig?.phone_id && (
+                                    <div style={{ marginBottom: '15px' }}>
+                                        <p style={{ margin: 0, fontWeight: 600 }}>WA Cloud API</p>
+                                        <small style={{ opacity: 0.6 }}>ID: {aiAgentConfig.phone_id}</small>
+                                        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '0.85rem' }}>💬 Sync. en Conversaciones</span>
+                                            <label className="switch">
+                                                <input type="checkbox" checked={aiAgentConfig.is_active} onChange={() => toggleConversationSync('whatsapp_cloud', aiAgentConfig)} />
+                                                <span className="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                )}
+                                {whaticketConfig?.api_key && (
+                                    <div style={{ marginTop: aiAgentConfig?.phone_id ? '15px' : '0' }}>
+                                        <p style={{ margin: 0, fontWeight: 600 }}>Whaticket</p>
+                                        <small style={{ opacity: 0.6 }}>API Key Configurada</small>
+                                        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '0.85rem' }}>💬 Sync. en Conversaciones</span>
+                                            <label className="switch">
+                                                <input type="checkbox" checked={whaticketConfig.is_active} onChange={() => toggleConversationSync('whaticket', whaticketConfig)} />
+                                                <span className="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <p style={{ fontSize: '0.8rem', opacity: 0.6, marginBottom: '20px' }}>Conecta WhatsApp desde la configuración del Agente IA o Whaticket.</p>
+                        )}
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button className="btn-secondary" style={{ flex: 1, padding: '8px' }} onClick={() => setActiveView('ai_agent')}>
+                                🤖 IA Config
+                            </button>
+                            <button className="btn-secondary" style={{ flex: 1, padding: '8px' }} onClick={() => setActiveView('whatsapp')}>
+                                💬 Whaticket
+                            </button>
+                        </div>
                     </div>
                 </div>
 

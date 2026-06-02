@@ -135,16 +135,34 @@ const ConversationsManager = ({ clinicId }) => {
     const fetchConversations = async (withLoading = false) => {
         if (withLoading) setLoadingConvs(true);
         try {
+            // Check active platforms
+            const { data: socialData } = await supabase.from('meta_social_accounts').select('platform').eq('clinic_id', clinicId).eq('is_active', true);
+            const { data: waData } = await supabase.from('ai_agent_config').select('is_active').eq('clinic_id', clinicId).maybeSingle();
+            const { data: whaData } = await supabase.from('whaticket_configs').select('is_active').eq('clinic_id', clinicId).maybeSingle();
+
+            const activePlatforms = [];
+            if (socialData) socialData.forEach(s => activePlatforms.push(s.platform));
+            if (waData?.is_active) activePlatforms.push('whatsapp');
+            if (whaData?.is_active) activePlatforms.push('whaticket');
+
+            if (activePlatforms.length === 0) {
+                setConversations([]);
+                if (withLoading) setLoadingConvs(false);
+                return;
+            }
+
             let { data, error } = await supabase
                 .from('meta_conversations')
                 .select('*, meta_messages(content, created_at)')
                 .eq('clinic_id', clinicId)
+                .in('platform', activePlatforms)
                 .order('last_message_at', { ascending: false });
 
             if (!data || data.length === 0) {
                 const { data: fallbackData } = await supabase
                     .from('meta_conversations')
                     .select('*, meta_messages(content, created_at)')
+                    .in('platform', activePlatforms)
                     .order('last_message_at', { ascending: false })
                     .limit(50);
                 if (fallbackData) data = fallbackData;

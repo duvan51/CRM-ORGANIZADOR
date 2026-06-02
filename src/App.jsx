@@ -1,29 +1,34 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, lazy, Suspense } from "react";
 import { supabase } from "./supabase";
 import AndoLogo from "./assets/logoAndoCrm.png";
 import "./index.css";
 import "./confirmation_pro.css";
 import "./sales.css";
-import CalendarView from "./components/CalendarView.jsx";
-import AgendaForm from "./components/AgendaForm.jsx";
-import Login from "./components/Login.jsx";
-import AdminPanel from "./components/AdminPanel.jsx";
-import ConfirmationPanel from "./components/ConfirmationPanel.jsx";
+
+// Lazy loaded components for bundle optimization
+const CalendarView = lazy(() => import("./components/CalendarView.jsx"));
+const AgendaForm = lazy(() => import("./components/AgendaForm.jsx"));
+const Login = lazy(() => import("./components/Login.jsx"));
+const AdminPanel = lazy(() => import("./components/AdminPanel.jsx"));
+const ConfirmationPanel = lazy(() => import("./components/ConfirmationPanel.jsx"));
+const AgentDashboard = lazy(() => import("./components/AgentDashboard.jsx"));
+const PatientTracking = lazy(() => import("./components/PatientTracking.jsx"));
+const ConversationsManager = lazy(() => import("./components/ConversationsManager.jsx"));
+const SubscriptionManager = lazy(() => import("./components/SubscriptionManager.jsx"));
+const QuickScheduleModal = lazy(() => import("./components/QuickScheduleModal.jsx"));
+const ResetPasswordForm = lazy(() => import("./components/ResetPasswordForm.jsx"));
+const MasterPanel = lazy(() => import("./components/MasterPanel.jsx"));
+const CrmLeadsBoard = lazy(() => import("./components/CrmLeadsBoard.jsx"));
+const WhatsappCampaigns = lazy(() => import("./components/WhatsappCampaigns.jsx"));
+const AutomationsKanban = lazy(() => import("./components/AutomationsKanban.jsx"));
+const PredictiveMarketing = lazy(() => import("./components/PredictiveMarketing.jsx"));
+const SocialPublisher = lazy(() => import("./components/SocialPublisher.jsx"));
+const VoiceCall = lazy(() => import("./components/VoiceCall.jsx"));
+const ExcelGridEditor = lazy(() => import("./components/ExcelGridEditor.jsx"));
+
+// Static/Eager imports
 import SalesCounter from "./components/SalesCounter.jsx";
-import AgentDashboard from "./components/AgentDashboard.jsx";
 import useWebSocket from "./hooks/useWebSocket.js";
-import PatientTracking from "./components/PatientTracking.jsx";
-import ConversationsManager from "./components/ConversationsManager.jsx";
-import SubscriptionManager from "./components/SubscriptionManager.jsx";
-import QuickScheduleModal from "./components/QuickScheduleModal.jsx";
-import ResetPasswordForm from "./components/ResetPasswordForm.jsx";
-import MasterPanel from "./components/MasterPanel.jsx";
-import VoiceCall from "./components/VoiceCall.jsx";
-import CrmLeadsBoard from "./components/CrmLeadsBoard.jsx";
-import WhatsappCampaigns from "./components/WhatsappCampaigns.jsx";
-import AutomationsKanban from "./components/AutomationsKanban.jsx";
-import PredictiveMarketing from "./components/PredictiveMarketing.jsx";
-import SocialPublisher from "./components/SocialPublisher.jsx";
 const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeField }) => (
   <div className="field-manager-container">
     <h4 className="field-manager-title">Columnas a unificar:</h4>
@@ -34,16 +39,51 @@ const FieldManager = ({ fields, newFieldName, setNewFieldName, addField, removeF
         </span>
       ))}
     </div>
-    <div className="field-add-control">
+    <div className="field-add-control" style={{ display: 'flex', gap: '10px', width: '100%' }}>
       <input
         type="text"
         placeholder="Añadir columna"
         value={newFieldName}
         onChange={e => setNewFieldName(e.target.value)}
         className="field-add-input"
+        style={{ width: '80%', flex: '0 0 calc(80% - 5px)' }}
       />
-      <button className="btn-process btn-add-field" onClick={addField}>+ Añadir</button>
+      <button 
+        className="btn-process btn-add-field" 
+        onClick={addField}
+        style={{ width: '20%', flex: '0 0 calc(20% - 5px)', display: 'flex', justifyContent: 'center', alignItems: 'center', whiteSpace: 'nowrap', padding: '8px 0' }}
+      >
+        + Añadir
+      </button>
     </div>
+  </div>
+);
+
+const LoadingSpinner = () => (
+  <div className="lazy-loader-container" style={{
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    alignItems: "center",
+    minHeight: "400px",
+    color: "var(--text-main)",
+    gap: "15px"
+  }}>
+    <div className="spinner" style={{
+      width: "40px",
+      height: "40px",
+      border: "4px solid rgba(255, 255, 255, 0.1)",
+      borderTop: "4px solid var(--primary)",
+      borderRadius: "50%",
+      animation: "spin 1s linear infinite"
+    }}></div>
+    <p style={{ fontSize: "0.95rem", opacity: 0.8, margin: 0 }}>Cargando módulo...</p>
+    <style>{`
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    `}</style>
   </div>
 );
 
@@ -56,6 +96,7 @@ function App() {
   const [files, setFiles] = useState(null);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
+  const [uploadMode, setUploadMode] = useState("file"); // "file" o "manual"
 
   useEffect(() => {
     if (user?.role === 'owner') {
@@ -473,7 +514,13 @@ function App() {
     setActiveAgenda(targetAgenda);
   };
 
-  if (isResetting) return <ResetPasswordForm onComplete={() => setIsResetting(false)} />;
+  if (isResetting) {
+    return (
+      <Suspense fallback={<LoadingSpinner />}>
+        <ResetPasswordForm onComplete={() => setIsResetting(false)} />
+      </Suspense>
+    );
+  }
 
   if (isDataDeletion) return (
     <div style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', color: 'var(--text-main)', textAlign: 'center' }}>
@@ -554,116 +601,24 @@ function App() {
     </div>
   );
 
-  if (!user) return <Login onLoginSuccess={(userData) => {
-    setUser(userData);
-    if (userData.agendas?.length > 0) setActiveAgenda(userData.agendas[0]);
-    if (userData.role !== 'superuser') setActiveTab("agenda");
-  }} />;
+  if (!user) {
+    return (
+      <Suspense fallback={<LoadingSpinner />}>
+        <Login onLoginSuccess={(userData) => {
+          setUser(userData);
+          if (userData.agendas?.length > 0) setActiveAgenda(userData.agendas[0]);
+          if (userData.role !== 'superuser') setActiveTab("agenda");
+        }} />
+      </Suspense>
+    );
+  }
 
-  const AppContent = () => (
-    <div className="card">
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-        <button className={step === 'board' || step === 3 ? "btn-process" : "btn-secondary"} onClick={() => setStep('board')}>Tablero Leads</button>
-        <button className={step === 1 || step === 2 ? "btn-process" : "btn-secondary"} onClick={() => setStep(1)}>Subir Dataset</button>
-      </div>
-
-      {error && (
-        <div style={{ padding: "10px", backgroundColor: "rgba(239, 68, 68, 0.1)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: "8px", marginBottom: "15px" }}>
-          <strong>Error:</strong> {error}
-        </div>
-      )}
-      {step === 1 && (
-        <>
-          <FieldManager fields={fields} newFieldName={newFieldName} setNewFieldName={setNewFieldName} addField={addField} removeField={removeField} />
-          <div className="upload-section">
-            <input type="file" multiple accept=".xlsx,.xls,.csv" onChange={(e) => {
-              setFiles(e.target.files);
-              setError(null);
-            }} className="custom-file-input" />
-
-            {files && files.length > 0 && (
-              <div style={{ marginTop: "15px", padding: "12px", backgroundColor: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: "8px", color: "var(--text-main)" }}>
-                <strong>✅ Archivos listos para analizar ({files.length}):</strong>
-                <ul style={{ margin: "8px 0 0 20px", fontSize: "0.95rem" }}>
-                  {Array.from(files).map((f, i) => (
-                    <li key={i}>{f.name}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="crm-actions-wrapper">
-              <button className="btn-process" onClick={() => uploadFiles(false)} disabled={loading || !files || files.length === 0}>
-                {loading ? "Analizando..." : "Analizar"}
-              </button>
-              <button className="btn-process" style={{ background: "rgba(239, 68, 68, 0.1)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.2)" }} onClick={clearAllFiles}>Limpiar</button>
-            </div>
-          </div>
-        </>
-      )}
-      {step === 2 && analysis && (
-        <>
-          <h3>Mapeo de columnas por archivo</h3>
-          {analysis.map((file, idx) => (
-            <div key={idx} style={{ marginBottom: "20px", padding: "15px", border: "1px solid var(--glass-border)", borderRadius: "8px" }}>
-              <h4>{file.filename}</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "10px" }}>
-                {file.columns.map(col => {
-                  const suggested = autoSuggestForField(fields, col);
-                  return (
-                    <div key={col} className="mapping-row">
-                      <span className="mapping-label">{col}</span>
-                      <select
-                        value={mapping[col] || suggested || ""}
-                        onChange={e => setMapping({ ...mapping, [col]: e.target.value })}
-                        className="custom-file-input mapping-select"
-                      >
-                        <option value="">-- Ignorar --</option>
-                        {fields.map(f => <option key={f} value={f}>{f}</option>)}
-                      </select>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-          <div style={{ margin: "20px 0" }}>
-            <label style={{ marginRight: "20px" }}>
-              <input type="checkbox" checked={unificar} onChange={e => setUnificar(e.target.checked)} /> Unificar archivos traslape
-            </label>
-            <div style={{ marginTop: "10px" }}>
-              <strong>Deduplicar por:</strong>
-              <div style={{ display: "flex", gap: "10px", marginTop: "5px" }}>
-                {fields.map(f => (
-                  <label key={f} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                    <input
-                      type="checkbox"
-                      checked={dedupCols.includes(f)}
-                      onChange={e => {
-                        if (e.target.checked) setDedupCols([...dedupCols, f]);
-                        else setDedupCols(dedupCols.filter(c => c !== f));
-                      }}
-                    />
-                    {f}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-          <button className="btn-process" onClick={processMapping} disabled={loading}>Guardar en Tablero</button>
-        </>
-      )}
-      {(step === 3 || step === 'board') && (
-        <div>
-          <CrmLeadsBoard user={user} activeAgenda={activeAgenda} />
-        </div>
-      )}
-    </div>
-  );
+  // AppContent inlined directly in the main return statement to prevent React unmounting on keystroke focus loss
 
 
   return (
-    <div className="container">
+    <Suspense fallback={<LoadingSpinner />}>
+      <div className="container">
       <header className="header">
         <div className="header-top">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -811,7 +766,150 @@ function App() {
       </header>
 
       <div style={{ padding: "20px" }}>
-        {activeTab === "crm" && <AppContent />}
+        {activeTab === "crm" && (
+          <div className="card">
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', width: '100%' }}>
+              <button 
+                className={step === 'board' || step === 3 ? "btn-process" : "btn-secondary"} 
+                onClick={() => setStep('board')}
+                style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+              >
+                Tablero Leads
+              </button>
+              <button 
+                className={step === 1 || step === 2 ? "btn-process" : "btn-secondary"} 
+                onClick={() => setStep(1)}
+                style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+              >
+                Subir Dataset
+              </button>
+            </div>
+
+            {error && (
+              <div style={{ padding: "10px", backgroundColor: "rgba(239, 68, 68, 0.1)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: "8px", marginBottom: "15px" }}>
+                <strong>Error:</strong> {error}
+              </div>
+            )}
+            {step === 1 && (
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: 'rgba(255,255,255,0.02)', padding: '8px', borderRadius: '10px', border: '1px solid var(--glass-border)', width: 'fit-content' }}>
+                <button
+                  className={uploadMode === 'file' ? "btn-process" : "btn-secondary"}
+                  onClick={() => setUploadMode('file')}
+                  style={{ padding: '6px 15px', fontSize: '0.85rem' }}
+                >
+                  📂 Cargar Excel / CSV
+                </button>
+                <button
+                  className={uploadMode === 'manual' ? "btn-process" : "btn-secondary"}
+                  onClick={() => setUploadMode('manual')}
+                  style={{ padding: '6px 15px', fontSize: '0.85rem' }}
+                >
+                  ✍️ Crear Tabla Manual (Excel)
+                </button>
+              </div>
+            )}
+
+            {step === 1 && uploadMode === 'file' && (
+              <>
+                <FieldManager fields={fields} newFieldName={newFieldName} setNewFieldName={setNewFieldName} addField={addField} removeField={removeField} />
+                <div className="upload-section">
+                  <input type="file" multiple accept=".xlsx,.xls,.csv" onChange={(e) => {
+                    setFiles(e.target.files);
+                    setError(null);
+                  }} className="custom-file-input" />
+
+                  {files && files.length > 0 && (
+                    <div style={{ marginTop: "15px", padding: "12px", backgroundColor: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: "8px", color: "var(--text-main)" }}>
+                      <strong>✅ Archivos listos para analizar ({files.length}):</strong>
+                      <ul style={{ margin: "8px 0 0 20px", fontSize: "0.95rem" }}>
+                        {Array.from(files).map((f, i) => (
+                          <li key={i}>{f.name}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="crm-actions-wrapper">
+                    <button className="btn-process" onClick={() => uploadFiles(false)} disabled={loading || !files || files.length === 0}>
+                      {loading ? "Analizando..." : "Analizar"}
+                    </button>
+                    <button className="btn-process" style={{ background: "rgba(239, 68, 68, 0.1)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.2)" }} onClick={clearAllFiles}>Limpiar</button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {step === 1 && uploadMode === 'manual' && (
+              <Suspense fallback={<LoadingSpinner />}>
+                <ExcelGridEditor
+                  user={user}
+                  activeAgenda={activeAgenda}
+                  fields={fields}
+                  onSaveSuccess={() => {
+                    setStep('board');
+                  }}
+                />
+              </Suspense>
+            )}
+            {step === 2 && analysis && (
+              <>
+                <h3>Mapeo de columnas por archivo</h3>
+                {analysis.map((file, idx) => (
+                  <div key={idx} style={{ marginBottom: "20px", padding: "15px", border: "1px solid var(--glass-border)", borderRadius: "8px" }}>
+                    <h4>{file.filename}</h4>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "10px" }}>
+                      {file.columns.map(col => {
+                        const suggested = autoSuggestForField(fields, col);
+                        return (
+                          <div key={col} className="mapping-row">
+                            <span className="mapping-label">{col}</span>
+                            <select
+                              value={mapping[col] || suggested || ""}
+                              onChange={e => setMapping({ ...mapping, [col]: e.target.value })}
+                              className="custom-file-input mapping-select"
+                            >
+                              <option value="">-- Ignorar --</option>
+                              {fields.map(f => <option key={f} value={f}>{f}</option>)}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                <div style={{ margin: "20px 0" }}>
+                  <label style={{ marginRight: "20px" }}>
+                    <input type="checkbox" checked={unificar} onChange={e => setUnificar(e.target.checked)} /> Unificar archivos traslape
+                  </label>
+                  <div style={{ marginTop: "10px" }}>
+                    <strong>Deduplicar por:</strong>
+                    <div style={{ display: "flex", gap: "10px", marginTop: "5px" }}>
+                      {fields.map(f => (
+                        <label key={f} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                          <input
+                            type="checkbox"
+                            checked={dedupCols.includes(f)}
+                            onChange={e => {
+                              if (e.target.checked) setDedupCols([...dedupCols, f]);
+                              else setDedupCols(dedupCols.filter(c => c !== f));
+                            }}
+                          />
+                          {f}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <button className="btn-process" onClick={processMapping} disabled={loading}>Guardar en Tablero</button>
+              </>
+            )}
+            {(step === 3 || step === 'board') && (
+              <div>
+                <CrmLeadsBoard user={user} activeAgenda={activeAgenda} />
+              </div>
+            )}
+          </div>
+        )}
 
         {activeTab === "confirmaciones" && (
           <ConfirmationPanel
@@ -952,7 +1050,8 @@ function App() {
           onClose={() => setShowVoiceCall(null)}
         />
       )}
-    </div>
+      </div>
+    </Suspense>
   );
 }
 

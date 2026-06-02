@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 
@@ -29,6 +29,18 @@ const MasterPanel = ({ user }) => {
 
     const [myPasswordData, setMyPasswordData] = useState({ newPassword: "", confirmPassword: "" });
     const [updatingMyOwnPassword, setUpdatingMyOwnPassword] = useState(false);
+
+    // Estados para la gestión expandida de sedes y personal
+    const [expandedClinicId, setExpandedClinicId] = useState(null);
+    const [addingAgendaForClinic, setAddingAgendaForClinic] = useState(null);
+    const [editingAgendaData, setEditingAgendaData] = useState(null);
+    const [addingMemberForClinic, setAddingMemberForClinic] = useState(null);
+    const [newMember, setNewMember] = useState({ full_name: "", username: "", email: "", password: "", role: "agent" });
+    const [newAgendaName, setNewAgendaName] = useState("");
+    const [orphanedUsers, setOrphanedUsers] = useState([]);
+    const [debugEmail, setDebugEmail] = useState("");
+    const [debugResult, setDebugResult] = useState(null);
+    const [debugLoading, setDebugLoading] = useState(false);
 
     const handleCreateSuperAdmin = async (e) => {
         e.preventDefault();
@@ -181,26 +193,267 @@ const MasterPanel = ({ user }) => {
         }
     };
 
+    // --- ACCIONES DE AGENDAS / SEDES EN PANEL MAESTRO ---
+    const handleCreateAgendaForClinic = async (e) => {
+        e.preventDefault();
+        if (!newAgendaName.trim()) return;
+        setLoading(true);
+        try {
+            const { error } = await supabase.from('agendas').insert({
+                name: newAgendaName.trim(),
+                description: "Sede creada desde Panel Maestro",
+                clinic_id: addingAgendaForClinic,
+                slots_per_hour: 1
+            });
+            if (error) throw error;
+            showNotify("Sede/Agenda creada con éxito.");
+            setAddingAgendaForClinic(null);
+            setNewAgendaName("");
+            fetchData();
+        } catch (err) {
+            console.error("Error creating agenda:", err);
+            showNotify("Error al crear sede: " + err.message, "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleUpdateAgendaName = async (e) => {
+        e.preventDefault();
+        if (!editingAgendaData.name.trim()) return;
+        setLoading(true);
+        try {
+            const { error } = await supabase.from('agendas')
+                .update({ name: editingAgendaData.name.trim() })
+                .eq('id', editingAgendaData.id);
+            if (error) throw error;
+            showNotify("Sede actualizada correctamente.");
+            setEditingAgendaData(null);
+            fetchData();
+        } catch (err) {
+            console.error("Error updating agenda:", err);
+            showNotify("Error al actualizar sede: " + err.message, "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteAgendaMaster = async (id) => {
+        if (!window.confirm("¿Estás seguro de eliminar esta sede y todas sus citas asociadas? Esta acción no se puede deshacer.")) return;
+        setLoading(true);
+        try {
+            const { error } = await supabase.from('agendas').delete().eq('id', id);
+            if (error) throw error;
+            showNotify("Sede eliminada correctamente.");
+            fetchData();
+        } catch (err) {
+            console.error("Error deleting agenda:", err);
+            showNotify("Error al eliminar sede: " + err.message, "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // --- ACCIONES DE COLABORADORES EN PANEL MAESTRO ---
+    const handleCreateMemberForClinic = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        try {
+            const tempClient = createClient(
+                import.meta.env.VITE_SUPABASE_URL,
+                import.meta.env.VITE_SUPABASE_ANON_KEY,
+                { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
+            );
+
+            const { data: authData, error: authError } = await tempClient.auth.signUp({
+                email: newMember.email,
+                password: newMember.password,
+            });
+
+            if (authError) throw authError;
+
+            if (authData?.user) {
+                const { error: profileError } = await supabase.from('profiles').upsert({
+                    id: authData.user.id,
+                    username: newMember.username || newMember.email,
+                    full_name: newMember.full_name,
+                    email: newMember.email,
+                    role: newMember.role,
+                    clinic_id: addingMemberForClinic,
+                    is_active: true
+                });
+
+                if (profileError) throw profileError;
+
+                showNotify("Colaborador creado exitosamente.");
+                setAddingMemberForClinic(null);
+                setNewMember({ full_name: "", username: "", email: "", password: "", role: "agent" });
+                fetchData();
+            }
+        } catch (err) {
+            console.error("Error creating collaborator:", err);
+            showNotify("Error al crear colaborador: " + err.message, "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleChangeMemberRole = async (memberId, currentRole) => {
+        const newRole = currentRole === 'admin' ? 'agent' : 'admin';
+        setLoading(true);
+        try {
+            const { error } = await supabase.from('profiles')
+                .update({ role: newRole })
+                .eq('id', memberId);
+            if (error) throw error;
+            showNotify("Rol del colaborador actualizado.");
+            fetchData();
+        } catch (err) {
+            console.error("Error changing role:", err);
+            showNotify("Error al cambiar rol: " + err.message, "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleChangeMemberPassword = async (memberId) => {
+        const newPassword = prompt("Introduce la nueva contraseña para este usuario (mínimo 6 caracteres):");
+        if (!newPassword) return;
+        if (newPassword.length < 6) {
+            alert("La contraseña debe tener al menos 6 caracteres.");
+            return;
+        }
+        setLoading(true);
+        try {
+            const { error } = await supabase.functions.invoke('manage-users', {
+                body: {
+                    userId: memberId,
+                    password: newPassword
+                }
+            });
+            if (error) throw error;
+            showNotify("Contraseña del colaborador actualizada.");
+        } catch (err) {
+            console.error("Error changing password:", err);
+            showNotify("Error: Revisa que la Edge Function esté activa", "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteMemberMaster = async (memberId) => {
+        if (!window.confirm("¿Deseas eliminar permanentemente a este usuario? Perderá el acceso de inmediato.")) return;
+        setLoading(true);
+        try {
+            const { error } = await supabase.functions.invoke('manage-users', {
+                body: {
+                    action: 'delete',
+                    userId: memberId
+                }
+            });
+            if (error) throw error;
+            showNotify("Colaborador eliminado con éxito.");
+            fetchData();
+        } catch (err) {
+            console.error("Error deleting collaborator:", err);
+            showNotify("Error al eliminar colaborador: " + err.message, "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // --- FUNCIONES DEL DEPURADOR DE CORREOS (AUTH) ---
+    const handleCheckAuthEmail = async (e) => {
+        e.preventDefault();
+        if (!debugEmail.trim()) return;
+        setDebugLoading(true);
+        setDebugResult(null);
+        try {
+            const { data, error } = await supabase.functions.invoke('manage-users', {
+                body: {
+                    action: 'checkAuth',
+                    email: debugEmail.trim()
+                }
+            });
+            if (error) throw error;
+            setDebugResult({ checked: true, exists: data.exists, user: data.user || null });
+        } catch (err) {
+            console.error("Error checking auth user:", err);
+            showNotify("Error al verificar correo: " + err.message, "error");
+        } finally {
+            setDebugLoading(false);
+        }
+    };
+
+    const handleDeleteAuthEmail = async () => {
+        if (!debugEmail.trim()) return;
+        if (!window.confirm(`⚠️ ADVERTENCIA CRÍTICA ⚠️\n¿Estás completamente seguro de eliminar de raíz el correo ${debugEmail.trim()}?\nEsto borrará la cuenta en Supabase Auth y su perfil en la base de datos permanentemente. Esta acción no se puede deshacer.`)) return;
+        
+        setDebugLoading(true);
+        try {
+            const { data, error } = await supabase.functions.invoke('manage-users', {
+                body: {
+                    action: 'deleteByEmail',
+                    email: debugEmail.trim()
+                }
+            });
+            if (error) throw error;
+            showNotify("Cuenta eliminada de raíz con éxito.");
+            setDebugEmail("");
+            setDebugResult(null);
+            fetchData();
+        } catch (err) {
+            console.error("Error deleting auth user by email:", err);
+            showNotify("Error al borrar cuenta: " + err.message, "error");
+        } finally {
+            setDebugLoading(false);
+        }
+    };
+
     const fetchData = async () => {
         setLoading(true);
         try {
-            // Fetch All Users who are SuperAdmins (Clinic Owners) with Plan Info
-            const { data: superAdminsData } = await supabase
-                .from('profiles')
-                .select('*, agendas:agenda_users(agenda_id), plan:subscription_plans(name)')
-                .eq('role', 'superuser');
+            // Cargar en paralelo todos los perfiles, agendas y planes de suscripción
+            const [profilesRes, agendasRes, plansRes] = await Promise.all([
+                supabase.from('profiles').select('*'),
+                supabase.from('agendas').select('*'),
+                supabase.from('subscription_plans').select('*')
+            ]);
 
-            // Map to include agenda count
-            const enrichedAdmins = superAdminsData?.map(sa => ({
-                ...sa,
-                sedesCount: sa.agendas?.length || 0
-            })) || [];
+            const profilesData = profilesRes.data || [];
+            const agendasData = agendasRes.data || [];
+            const plansData = plansRes.data || [];
+
+            // Filtrar los perfiles que son SuperAdministradores (role === 'superuser')
+            const superAdminsProfiles = profilesData.filter(p => p.role === 'superuser');
+            const superAdminIds = superAdminsProfiles.map(sa => sa.id);
+
+            // Filtrar perfiles huérfanos (no superuser, no dueño, y clinic_id no asignado o inválido)
+            const orphanedProfiles = profilesData.filter(p => 
+                p.role !== 'superuser' && 
+                p.role !== 'owner' && 
+                p.username !== 'duvanaponteramirez@gmail.com' &&
+                (!p.clinic_id || !superAdminIds.includes(p.clinic_id))
+            );
+
+            // Enriquecer cada SuperAdmin con sus agendas asociadas y colaboradores
+            const enrichedAdmins = superAdminsProfiles.map(sa => {
+                const clinicAgendas = agendasData.filter(a => a.clinic_id === sa.id);
+                const clinicMembers = profilesData.filter(p => p.clinic_id === sa.id && p.id !== sa.id);
+                const matchedPlan = plansData.find(p => p.id === sa.subscription_plan_id) || null;
+
+                return {
+                    ...sa,
+                    sedesCount: clinicAgendas.length,
+                    clinicAgendas,
+                    clinicMembers,
+                    plan: matchedPlan ? { name: matchedPlan.name } : null
+                };
+            });
 
             setSuperAdmins(enrichedAdmins);
-
-            // Fetch Plans for dropdowns
-            const { data: plansData } = await supabase.from('subscription_plans').select('*');
-            setPlans(plansData || []);
+            setOrphanedUsers(orphanedProfiles);
+            setPlans(plansData);
 
             // Stats
             setStats({
@@ -270,51 +523,406 @@ const MasterPanel = ({ user }) => {
                         </thead>
                         <tbody>
                             {superAdmins.map((user, idx) => (
-                                <tr key={idx}>
-                                    <td><strong>{user.clinic_name || "Sin Nombre"}</strong></td>
-                                    <td>{user.full_name}</td>
-                                    <td>{user.username}</td>
-                                    <td style={{ textAlign: 'center' }}>
-                                        <span className="info-badge" style={{ background: 'var(--primary)', color: 'white' }}>
-                                            🏥 {user.sedesCount}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span className="status-pill confirmada" style={{ background: 'var(--accent)' }}>
-                                            {user.plan?.name || "Gratuito / N.A"}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span className={`role-badge ${user.role}`}>
-                                            {user.role === 'superuser' ? 'SuperAdmin' : user.role === 'admin' ? 'Administrador' : 'Agente'}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span className="status-pill confirmada">Al Día</span>
-                                    </td>
-                                    <td>
-                                        <div style={{ display: 'flex', gap: '8px' }}>
-                                            <button
-                                                className="btn-pro-icon edit"
-                                                title="Ver Detalles"
-                                                onClick={() => setViewingClinic(user)}
-                                            >
-                                                👁️
-                                            </button>
-                                            <button
-                                                className="btn-pro-icon edit"
-                                                title="Editar Clínica"
-                                                onClick={() => setEditingSuperAdmin(user)}
-                                            >
-                                                ✏️
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
+                                <React.Fragment key={user.id || idx}>
+                                    <tr style={{ borderBottom: expandedClinicId === user.id ? 'none' : '1px solid var(--glass-border)' }}>
+                                        <td><strong>{user.clinic_name || "Sin Nombre"}</strong></td>
+                                        <td>{user.full_name}</td>
+                                        <td>{user.username}</td>
+                                        <td style={{ textAlign: 'center' }}>
+                                            <span className="info-badge" style={{ background: 'var(--primary)', color: 'white' }}>
+                                                🏥 {user.sedesCount}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span className="status-pill confirmada" style={{ background: 'var(--accent)' }}>
+                                                {user.plan?.name || "Gratuito / N.A"}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span className={`role-badge ${user.role}`}>
+                                                {user.role === 'superuser' ? 'SuperAdmin' : user.role === 'admin' ? 'Administrador' : 'Agente'}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span className="status-pill confirmada">Al Día</span>
+                                        </td>
+                                        <td>
+                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                <button
+                                                    className="btn-pro-icon edit"
+                                                    title="Ver Detalles"
+                                                    onClick={() => setViewingClinic(user)}
+                                                >
+                                                    👁️
+                                                </button>
+                                                <button
+                                                    className="btn-pro-icon edit"
+                                                    title="Editar Clínica"
+                                                    onClick={() => setEditingSuperAdmin(user)}
+                                                >
+                                                    ✏️
+                                                </button>
+                                                <button
+                                                    className="btn-pro-icon edit"
+                                                    title="Sedes y Personal"
+                                                    onClick={() => setExpandedClinicId(expandedClinicId === user.id ? null : user.id)}
+                                                    style={{
+                                                        background: expandedClinicId === user.id ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
+                                                        color: expandedClinicId === user.id ? 'white' : 'inherit'
+                                                    }}
+                                                >
+                                                    {expandedClinicId === user.id ? "📂" : "📁"}
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {expandedClinicId === user.id && (
+                                        <tr key={`expand-${user.id}`} className="expanded-row animate-in" style={{ background: 'rgba(255, 255, 255, 0.01)' }}>
+                                            <td colSpan={8} style={{ padding: '25px 20px', borderBottom: '1px solid var(--glass-border)', background: 'rgba(0, 0, 0, 0.2)' }}>
+                                                <div style={{
+                                                    display: 'grid',
+                                                    gridTemplateColumns: '1fr 1.2fr',
+                                                    gap: '25px'
+                                                }}>
+                                                    {/* Columna Agendas/Sedes */}
+                                                    <div style={{
+                                                        background: 'rgba(255, 255, 255, 0.02)',
+                                                        padding: '20px',
+                                                        borderRadius: '16px',
+                                                        border: '1px solid var(--glass-border)',
+                                                        boxShadow: 'inset 0 0 20px rgba(255, 255, 255, 0.01)'
+                                                    }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                                                            <h4 style={{ margin: 0, fontSize: '1rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                🏥 Agendas y Sedes ({user.clinicAgendas?.length || 0})
+                                                            </h4>
+                                                            <button
+                                                                className="btn-process"
+                                                                style={{ padding: '5px 12px', fontSize: '0.75rem', borderRadius: '8px' }}
+                                                                onClick={() => setAddingAgendaForClinic(user.id)}
+                                                            >
+                                                                + Nueva Sede
+                                                            </button>
+                                                        </div>
+
+                                                        {user.clinicAgendas && user.clinicAgendas.length > 0 ? (
+                                                            <div className="table-wrapper" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                                                                <table className="modern-table compact" style={{ width: '100%', fontSize: '0.85rem' }}>
+                                                                    <thead>
+                                                                        <tr>
+                                                                            <th>Nombre Sede</th>
+                                                                            <th style={{ textAlign: 'right' }}>Acciones</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {user.clinicAgendas.map(agenda => (
+                                                                            <tr key={agenda.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                                                <td><strong>{agenda.name}</strong></td>
+                                                                                <td style={{ textAlign: 'right' }}>
+                                                                                    <div style={{ display: 'flex', gap: '5px', justifyContent: 'flex-end' }}>
+                                                                                        <button
+                                                                                            className="btn-pro-icon edit"
+                                                                                            title="Editar Nombre"
+                                                                                            onClick={() => setEditingAgendaData(agenda)}
+                                                                                            style={{ padding: '3px 8px', fontSize: '0.8rem', background: 'rgba(255,255,255,0.05)' }}
+                                                                                        >
+                                                                                            ✏️
+                                                                                        </button>
+                                                                                        <button
+                                                                                            className="btn-pro-icon delete"
+                                                                                            title="Eliminar Sede"
+                                                                                            onClick={() => handleDeleteAgendaMaster(agenda.id)}
+                                                                                            style={{ padding: '3px 8px', fontSize: '0.8rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}
+                                                                                        >
+                                                                                            🗑️
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        ) : (
+                                                            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', margin: '20px 0' }}>
+                                                                No hay sedes creadas para esta clínica.
+                                                            </p>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Columna Personal/Colaboradores */}
+                                                    <div style={{
+                                                        background: 'rgba(255, 255, 255, 0.02)',
+                                                        padding: '20px',
+                                                        borderRadius: '16px',
+                                                        border: '1px solid var(--glass-border)',
+                                                        boxShadow: 'inset 0 0 20px rgba(255, 255, 255, 0.01)'
+                                                    }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                                                            <h4 style={{ margin: 0, fontSize: '1rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                👥 Personal y Colaboradores ({user.clinicMembers?.length || 0})
+                                                            </h4>
+                                                            <button
+                                                                className="btn-process"
+                                                                style={{ padding: '5px 12px', fontSize: '0.75rem', borderRadius: '8px' }}
+                                                                onClick={() => setAddingMemberForClinic(user.id)}
+                                                            >
+                                                                + Nuevo Usuario
+                                                            </button>
+                                                        </div>
+
+                                                        {user.clinicMembers && user.clinicMembers.length > 0 ? (
+                                                            <div className="table-wrapper" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                                                                <table className="modern-table compact" style={{ width: '100%', fontSize: '0.85rem' }}>
+                                                                    <thead>
+                                                                        <tr>
+                                                                            <th>Nombre</th>
+                                                                            <th>Usuario / Correo</th>
+                                                                            <th>Rol</th>
+                                                                            <th style={{ textAlign: 'right' }}>Acciones</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {user.clinicMembers.map(member => (
+                                                                            <tr key={member.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                                                <td>{member.full_name || "Sin Nombre"}</td>
+                                                                                <td>{member.email || member.username}</td>
+                                                                                <td>
+                                                                                    <span className={`role-badge ${member.role}`} style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
+                                                                                        {member.role === 'admin' ? 'Admin' : 'Agente'}
+                                                                                    </span>
+                                                                                </td>
+                                                                                <td style={{ textAlign: 'right' }}>
+                                                                                    <div style={{ display: 'flex', gap: '5px', justifyContent: 'flex-end' }}>
+                                                                                        <button
+                                                                                            className="btn-pro-icon edit"
+                                                                                            title="Cambiar Rol (Admin/Agente)"
+                                                                                            onClick={() => handleChangeMemberRole(member.id, member.role)}
+                                                                                            style={{ padding: '3px 8px', fontSize: '0.8rem', background: 'rgba(255,255,255,0.05)' }}
+                                                                                        >
+                                                                                            🔑
+                                                                                        </button>
+                                                                                        <button
+                                                                                            className="btn-pro-icon edit"
+                                                                                            title="Cambiar Contraseña"
+                                                                                            onClick={() => handleChangeMemberPassword(member.id)}
+                                                                                            style={{ padding: '3px 8px', fontSize: '0.8rem', background: 'rgba(255,255,255,0.05)' }}
+                                                                                        >
+                                                                                            🔒
+                                                                                        </button>
+                                                                                        <button
+                                                                                            className="btn-pro-icon delete"
+                                                                                            title="Eliminar Cuenta"
+                                                                                            onClick={() => handleDeleteMemberMaster(member.id)}
+                                                                                            style={{ padding: '3px 8px', fontSize: '0.8rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}
+                                                                                        >
+                                                                                            🗑️
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        ) : (
+                                                            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', margin: '20px 0' }}>
+                                                                No hay colaboradores creados para esta clínica.
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>
                 </div>
+            </div>
+
+            {/* Sección de Cuentas Huérfanas */}
+            <div className="card" style={{ marginTop: '25px', padding: '25px' }}>
+                <h3 style={{ margin: 0, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    🔍 Cuentas de Usuario Huérfanas <span style={{ fontSize: '0.85rem', background: 'var(--accent)', color: 'white', padding: '2px 8px', borderRadius: '12px' }}>{orphanedUsers.length}</span>
+                </h3>
+                <p style={{ color: 'var(--text-muted)', marginTop: '5px', fontSize: '0.9rem' }}>
+                    Usuarios registrados en el sistema que no están vinculados a ninguna clínica activa (o su clínica fue eliminada).
+                </p>
+
+                {orphanedUsers.length > 0 ? (
+                    <div className="table-wrapper" style={{ marginTop: '15px' }}>
+                        <table className="modern-table">
+                            <thead>
+                                <tr>
+                                    <th>Nombre</th>
+                                    <th>Usuario / Correo</th>
+                                    <th>Rol Actual</th>
+                                    <th>Vincular a Clínica</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {orphanedUsers.map(member => (
+                                    <tr key={member.id}>
+                                        <td><strong>{member.full_name || "Sin Nombre"}</strong></td>
+                                        <td>{member.email || member.username}</td>
+                                        <td>
+                                            <span className={`role-badge ${member.role}`} style={{ fontSize: '0.75rem', padding: '2px 8px' }}>
+                                                {member.role === 'admin' ? 'Administrador' : 'Agente'}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <select
+                                                value={member.clinic_id || ""}
+                                                onChange={async (e) => {
+                                                    const clinicId = e.target.value;
+                                                    if (!clinicId) return;
+                                                    if (!window.confirm(`¿Deseas vincular a ${member.full_name || member.username} a esta clínica?`)) return;
+                                                    setLoading(true);
+                                                    try {
+                                                        const { error } = await supabase.from('profiles').update({ clinic_id: clinicId }).eq('id', member.id);
+                                                        if (error) throw error;
+                                                        showNotify("Usuario vinculado correctamente a la clínica.");
+                                                        fetchData();
+                                                    } catch (err) {
+                                                        showNotify("Error al vincular: " + err.message, "error");
+                                                    } finally {
+                                                        setLoading(false);
+                                                    }
+                                                }}
+                                                style={{
+                                                    background: 'rgba(255,255,255,0.05)',
+                                                    color: 'white',
+                                                    border: '1px solid var(--glass-border)',
+                                                    padding: '6px 12px',
+                                                    borderRadius: '8px',
+                                                    cursor: 'pointer',
+                                                    width: '100%',
+                                                    maxWidth: '250px'
+                                                }}
+                                            >
+                                                <option value="">-- Seleccionar Clínica --</option>
+                                                {superAdmins.map(sa => (
+                                                    <option key={sa.id} value={sa.id}>{sa.clinic_name || sa.full_name}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                <button
+                                                    className="btn-pro-icon edit"
+                                                    title="Cambiar Rol"
+                                                    onClick={() => handleChangeMemberRole(member.id, member.role)}
+                                                    style={{ padding: '4px 10px', fontSize: '0.85rem', background: 'rgba(255,255,255,0.05)' }}
+                                                >
+                                                    🔑
+                                                </button>
+                                                <button
+                                                    className="btn-pro-icon edit"
+                                                    title="Cambiar Contraseña"
+                                                    onClick={() => handleChangeMemberPassword(member.id)}
+                                                    style={{ padding: '4px 10px', fontSize: '0.85rem', background: 'rgba(255,255,255,0.05)' }}
+                                                >
+                                                    🔒
+                                                </button>
+                                                <button
+                                                    className="btn-pro-icon delete"
+                                                    title="Eliminar Cuenta"
+                                                    onClick={() => handleDeleteMemberMaster(member.id)}
+                                                    style={{ padding: '4px 10px', fontSize: '0.85rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}
+                                                >
+                                                    🗑️
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', margin: '30px 0' }}>
+                        🎉 ¡No hay cuentas de usuario huérfanas en el sistema! Todos los colaboradores pertenecen a una clínica.
+                    </p>
+                )}
+            </div>
+
+            {/* Depurador de Cuentas (Auth / Registro) */}
+            <div className="card" style={{ marginTop: '25px', padding: '25px' }}>
+                <h3 style={{ margin: 0, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    🔍 Depurador de Cuentas de Acceso (Auth)
+                </h3>
+                <p style={{ color: 'var(--text-muted)', marginTop: '5px', fontSize: '0.9rem' }}>
+                    ¿Un correo da error de "ya registrado" al crear una clínica o colaborador, pero no aparece en el listado? Búscalo aquí y elimínalo de raíz del sistema de autenticación de Supabase para liberarlo de inmediato.
+                </p>
+
+                <form onSubmit={handleCheckAuthEmail} style={{ display: 'flex', gap: '15px', marginTop: '20px', alignItems: 'flex-end', maxWidth: '600px' }}>
+                    <div className="filter-group" style={{ flex: 1, margin: 0 }}>
+                        <label style={{ color: 'var(--text-main)', marginBottom: '8px', fontSize: '0.85rem' }}>Correo Electrónico a Investigar</label>
+                        <input
+                            type="email"
+                            required
+                            placeholder="ejemplo@correo.com"
+                            value={debugEmail}
+                            onChange={e => {
+                                setDebugEmail(e.target.value);
+                                setDebugResult(null);
+                            }}
+                            style={{ width: '100%' }}
+                        />
+                    </div>
+                    <button type="submit" className="btn-process" disabled={debugLoading} style={{ height: '42px', padding: '0 25px' }}>
+                        {debugLoading ? "Buscando..." : "🔍 Investigar en Auth"}
+                    </button>
+                </form>
+
+                {debugResult && debugResult.checked && (
+                    <div style={{
+                        marginTop: '20px',
+                        padding: '20px',
+                        background: debugResult.exists ? 'rgba(239, 68, 68, 0.05)' : 'rgba(34, 197, 94, 0.05)',
+                        border: debugResult.exists ? '1px dashed #ef4444' : '1px dashed #22c55e',
+                        borderRadius: '12px',
+                        maxWidth: '600px'
+                    }}>
+                        {debugResult.exists ? (
+                            <div>
+                                <h4 style={{ margin: '0 0 10px 0', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    ⚠️ Registro Encontrado en Supabase Auth
+                                </h4>
+                                <p style={{ margin: '5px 0', fontSize: '0.9rem' }}>
+                                    <strong>ID del Usuario:</strong> {debugResult.user?.id}
+                                </p>
+                                <p style={{ margin: '5px 0', fontSize: '0.9rem' }}>
+                                    <strong>Registrado el:</strong> {new Date(debugResult.user?.created_at).toLocaleString()}
+                                </p>
+                                <p style={{ margin: '15px 0 10px 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                                    El correo está ocupando un espacio en el sistema de autenticación de Supabase (pero no tiene un perfil visible en la base de datos). Esto bloquea la creación de cualquier nueva empresa con este email.
+                                </p>
+                                <button
+                                    type="button"
+                                    className="btn-process"
+                                    onClick={handleDeleteAuthEmail}
+                                    style={{ background: '#ef4444', color: 'white', marginTop: '10px' }}
+                                    disabled={debugLoading}
+                                >
+                                    {debugLoading ? "Eliminando..." : "🗑️ Eliminar cuenta de raíz (Liberar Correo)"}
+                                </button>
+                            </div>
+                        ) : (
+                            <div>
+                                <h4 style={{ margin: '0 0 10px 0', color: '#22c55e', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    ✅ Correo Completamente Disponible
+                                </h4>
+                                <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                                    El correo <strong>{debugEmail}</strong> no está registrado en el sistema de autenticación de Supabase ni en la base de datos de perfiles. Está 100% libre para ser registrado.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             <div className="card" style={{ marginTop: '25px', padding: '25px' }}>
@@ -594,6 +1202,125 @@ const MasterPanel = ({ user }) => {
                         <div className="modal-footer" style={{ borderTop: '1px solid var(--glass-border)', padding: '15px 20px', textAlign: 'right' }}>
                             <button className="btn-secondary" onClick={() => setViewingClinic(null)}>Cerrar</button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {addingAgendaForClinic && (
+                <div className="modal-overlay">
+                    <div className="modal-content premium-modal animate-in" style={{ maxWidth: '450px' }}>
+                        <h3>Crear Nueva Sede / Agenda</h3>
+                        <p className="text-muted">Asigna una nueva agenda de atención a esta clínica.</p>
+                        <form onSubmit={handleCreateAgendaForClinic} className="premium-form-v">
+                            <div className="form-group">
+                                <label>Nombre de la Sede</label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="Ej: Sede Norte / Consultorio 2"
+                                    value={newAgendaName}
+                                    onChange={e => setNewAgendaName(e.target.value)}
+                                />
+                            </div>
+                            <div className="modal-actions">
+                                <button type="button" className="btn-secondary" onClick={() => { setAddingAgendaForClinic(null); setNewAgendaName(""); }}>Cancelar</button>
+                                <button type="submit" className="btn-process" disabled={loading}>
+                                    {loading ? "Creando..." : "Crear Sede"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {editingAgendaData && (
+                <div className="modal-overlay">
+                    <div className="modal-content premium-modal animate-in" style={{ maxWidth: '450px' }}>
+                        <h3>Editar Sede / Agenda</h3>
+                        <p className="text-muted">Cambia el nombre de la sede.</p>
+                        <form onSubmit={handleUpdateAgendaName} className="premium-form-v">
+                            <div className="form-group">
+                                <label>Nombre de la Sede</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={editingAgendaData.name}
+                                    onChange={e => setEditingAgendaData({ ...editingAgendaData, name: e.target.value })}
+                                />
+                            </div>
+                            <div className="modal-actions">
+                                <button type="button" className="btn-secondary" onClick={() => setEditingAgendaData(null)}>Cancelar</button>
+                                <button type="submit" className="btn-process" disabled={loading}>
+                                    {loading ? "Guardando..." : "Guardar Cambios"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {addingMemberForClinic && (
+                <div className="modal-overlay">
+                    <div className="modal-content premium-modal animate-in" style={{ maxWidth: '500px' }}>
+                        <h3>Nuevo Colaborador / Usuario</h3>
+                        <p className="text-muted">Crea una cuenta para el personal de esta clínica.</p>
+                        <form onSubmit={handleCreateMemberForClinic} className="premium-form-v">
+                            <div className="form-group">
+                                <label>Nombre Completo</label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="Ej: Dr. Carlos Pérez"
+                                    value={newMember.full_name}
+                                    onChange={e => setNewMember({ ...newMember, full_name: e.target.value })}
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Usuario / Alias (Opcional)</label>
+                                <input
+                                    type="text"
+                                    placeholder="carlosperez"
+                                    value={newMember.username}
+                                    onChange={e => setNewMember({ ...newMember, username: e.target.value })}
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Correo de Acceso (Email)</label>
+                                <input
+                                    type="email"
+                                    required
+                                    placeholder="carlos@clinica.com"
+                                    value={newMember.email}
+                                    onChange={e => setNewMember({ ...newMember, email: e.target.value })}
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Contraseña Temporal</label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="clave123"
+                                    value={newMember.password}
+                                    onChange={e => setNewMember({ ...newMember, password: e.target.value })}
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Rol Inicial</label>
+                                <select
+                                    value={newMember.role}
+                                    onChange={e => setNewMember({ ...newMember, role: e.target.value })}
+                                >
+                                    <option value="agent">Agente (Acceso limitado a agendas asignadas)</option>
+                                    <option value="admin">Administrador (Acceso total a la clínica)</option>
+                                </select>
+                            </div>
+                            <div className="modal-actions">
+                                <button type="button" className="btn-secondary" onClick={() => { setAddingMemberForClinic(null); setNewMember({ full_name: "", username: "", email: "", password: "", role: "agent" }); }}>Cancelar</button>
+                                <button type="submit" className="btn-process" disabled={loading}>
+                                    {loading ? "Creando..." : "Crear Usuario"}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}
