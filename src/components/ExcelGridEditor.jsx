@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../supabase";
+import ConfirmModal from "./ConfirmModal";
 
 const COLUMN_LABELS = {
   nombres_completos: "Nombres Completos *",
@@ -8,7 +9,9 @@ const COLUMN_LABELS = {
   hora: "Hora",
   tipo_servicio: "Tipo de Servicio",
   documento: "Documento",
-  observaciones: "Observaciones"
+  observaciones: "Observaciones",
+  recordatorio_fecha: "Fecha Recordatorio ⏰",
+  recordatorio_texto: "Detalle Recordatorio ⏰"
 };
 
 const getColumnLabel = (field) => {
@@ -19,7 +22,7 @@ const getColumnLabel = (field) => {
 };
 
 const getColumnInputType = (field) => {
-  if (field === "fecha") return "date";
+  if (field === "fecha" || field === "recordatorio_fecha") return "date";
   if (field === "hora") return "time";
   return "text";
 };
@@ -30,6 +33,8 @@ const getColumnPlaceholder = (field) => {
   if (field === "tipo_servicio") return "Valoración, Estética...";
   if (field === "documento") return "ID / CC";
   if (field === "observaciones") return "Detalles adicionales...";
+  if (field === "recordatorio_fecha") return "Selecciona fecha";
+  if (field === "recordatorio_texto") return "Ej: Llamar por la tarde";
   return `${getColumnLabel(field)}...`;
 };
 
@@ -41,6 +46,8 @@ const getColumnWidth = (field) => {
   if (field === "tipo_servicio") return "150px";
   if (field === "documento") return "120px";
   if (field === "observaciones") return "220px";
+  if (field === "recordatorio_fecha") return "150px";
+  if (field === "recordatorio_texto") return "220px";
   return "150px";
 };
 
@@ -57,6 +64,12 @@ export default function ExcelGridEditor({ user, activeAgenda, fields, onSaveSucc
     if (row.observaciones === undefined) {
       row.observaciones = "";
     }
+    if (row.recordatorio_fecha === undefined) {
+      row.recordatorio_fecha = "";
+    }
+    if (row.recordatorio_texto === undefined) {
+      row.recordatorio_texto = "";
+    }
     return row;
   };
 
@@ -67,6 +80,43 @@ export default function ExcelGridEditor({ user, activeAgenda, fields, onSaveSucc
   ]);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState(null);
+
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    confirmText: "Confirmar",
+    cancelText: "Cancelar",
+    type: "confirm",
+    icon: "❓",
+    onConfirm: null
+  });
+
+  const showAlert = (message, title = "Aviso", icon = "ℹ️") => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      confirmText: "Aceptar",
+      cancelText: "",
+      type: "alert",
+      icon,
+      onConfirm: null
+    });
+  };
+
+  const showConfirm = (message, onConfirm, title = "Confirmar", icon = "❓", type = "confirm") => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      confirmText: "Confirmar",
+      cancelText: "Cancelar",
+      type,
+      icon,
+      onConfirm
+    });
+  };
 
   // Sync fields when they update (if user adds a column in real-time, keep existing typed data)
   useEffect(() => {
@@ -80,6 +130,12 @@ export default function ExcelGridEditor({ user, activeAgenda, fields, onSaveSucc
         });
         if (updated.observaciones === undefined) {
           updated.observaciones = "";
+        }
+        if (updated.recordatorio_fecha === undefined) {
+          updated.recordatorio_fecha = "";
+        }
+        if (updated.recordatorio_texto === undefined) {
+          updated.recordatorio_texto = "";
         }
         return updated;
       })
@@ -106,19 +162,19 @@ export default function ExcelGridEditor({ user, activeAgenda, fields, onSaveSucc
   };
 
   const clearAll = () => {
-    if (window.confirm("¿Seguro que deseas limpiar toda la tabla? Se perderán los datos actuales.")) {
+    showConfirm("¿Seguro que deseas limpiar toda la tabla? Se perderán los datos actuales.", () => {
       setRows([
         createEmptyRow(1),
         createEmptyRow(2),
         createEmptyRow(3)
       ]);
       setFeedback(null);
-    }
+    }, "Confirmar Acción", "🧹", "danger");
   };
 
   const handleSave = async () => {
     if (!activeAgenda || activeAgenda === "all") {
-      alert("⚠️ Por favor selecciona una Sede o Agenda específica en la barra superior antes de guardar.");
+      showAlert("Por favor selecciona una Sede o Agenda específica en la barra superior antes de guardar.", "Selección Requerida", "⚠️");
       return;
     }
 
@@ -165,23 +221,44 @@ export default function ExcelGridEditor({ user, activeAgenda, fields, onSaveSucc
         };
 
         // Custom columns: append them dynamically to the observations text to prevent DB insert errors
-        let finalObs = (row.observaciones || "").trim();
+        let finalObsText = (row.observaciones || "").trim();
         activeFields.forEach(field => {
-          // Standard columns in the crm_leads table
-          const isStandard = ["nombres_completos", "celular", "tipo_servicio", "documento", "observaciones"].includes(field);
+          // Standard columns in the crm_leads table, plus our custom reminder columns
+          const isStandard = [
+            "nombres_completos", 
+            "celular", 
+            "tipo_servicio", 
+            "documento", 
+            "observaciones",
+            "recordatorio_fecha",
+            "recordatorio_texto"
+          ].includes(field);
+          
           if (!isStandard && row[field] && row[field].toString().trim() !== "") {
             const label = getColumnLabel(field);
-            finalObs += `${finalObs ? " | " : ""}${label}: ${row[field].toString().trim()}`;
+            finalObsText += `${finalObsText ? " | " : ""}${label}: ${row[field].toString().trim()}`;
           }
         });
 
-        standardPayload.observaciones = finalObs;
+        // If either reminder date or text is set, structure observations as JSON
+        const hasReminder = (row.recordatorio_fecha || "").trim() !== "" || (row.recordatorio_texto || "").trim() !== "";
+        let finalObsVal = finalObsText;
+        if (hasReminder) {
+          finalObsVal = JSON.stringify({
+            texto_original: finalObsText,
+            notas: [],
+            recordatorio_fecha: (row.recordatorio_fecha || "").trim(),
+            recordatorio_texto: (row.recordatorio_texto || "").trim()
+          });
+        }
+
+        standardPayload.observaciones = finalObsVal;
         return standardPayload;
       });
 
       const { error } = await supabase
-        .from('crm_leads')
-        .insert(leadsToInsert);
+          .from('crm_leads')
+          .insert(leadsToInsert);
 
       if (error) throw error;
 
@@ -198,10 +275,16 @@ export default function ExcelGridEditor({ user, activeAgenda, fields, onSaveSucc
     }
   };
 
-  // Compile full columns array: activeFields + observaciones (if not already included)
+  // Compile full columns array: activeFields + observaciones & reminders (if not already included)
   const displayFields = [...activeFields];
   if (!displayFields.includes("observaciones")) {
     displayFields.push("observaciones");
+  }
+  if (!displayFields.includes("recordatorio_fecha")) {
+    displayFields.push("recordatorio_fecha");
+  }
+  if (!displayFields.includes("recordatorio_texto")) {
+    displayFields.push("recordatorio_texto");
   }
 
   return (
@@ -339,6 +422,10 @@ export default function ExcelGridEditor({ user, activeAgenda, fields, onSaveSucc
           background: rgba(255, 255, 255, 0.01);
         }
       `}</style>
+      <ConfirmModal 
+        {...confirmModal} 
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))} 
+      />
     </div>
   );
 }

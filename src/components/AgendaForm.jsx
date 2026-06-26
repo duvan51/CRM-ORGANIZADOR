@@ -51,13 +51,19 @@ export default function AgendaForm({ selectedDate, onCitaCreated, onCancel, agen
     useEffect(() => {
         const fetchConfig = async () => {
             try {
+                // Fetch agenda to get clinic_id
+                const { data: agendaData } = await supabase.from('agendas').select('clinic_id').eq('id', agendaId).single();
+                const clinicId = agendaData?.clinic_id;
+
                 const [sRes, hRes, bRes, hsRes, cRes, vRes, mRes, pRes] = await Promise.all([
                     supabase.from('agenda_services').select('*, service:global_services(*)').eq('agenda_id', agendaId),
                     supabase.from('horarios_atencion').select('*').eq('agenda_id', agendaId),
                     supabase.from('bloqueos').select('*').eq('agenda_id', agendaId),
                     supabase.from('horarios_servicios').select('*').eq('agenda_id', agendaId),
                     supabase.from('citas').select('*').eq('agenda_id', agendaId).eq('fecha', selectedDate.toISOString().split('T')[0]),
-                    supabase.from('profiles').select('full_name, username').eq('is_active', true),
+                    clinicId 
+                        ? supabase.from('profiles').select('full_name, username').eq('is_active', true).eq('clinic_id', clinicId)
+                        : supabase.from('profiles').select('full_name, username').eq('is_active', true),
                     supabase.from('meta_ads_agenda_mapping').select('*').eq('agenda_id', agendaId),
                     supabase.from('meta_ads_performance').select('campaign_id, campaign_name')
                 ]);
